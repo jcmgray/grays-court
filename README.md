@@ -15,7 +15,7 @@ then open http://localhost:8000. Add `?date=2026-11-01` to play another day, or 
 ## Puzzles
 
 ```bash
-node scripts/make_puzzles.js 2026-10-21 365
+node scripts/make_puzzles.js 2026-10-23 365
 ```
 
 This fills `puzzles/daily.json` with one puzzle per day and keeps dates already there. Each date seeds its own puzzle, so the site can also make any day's puzzle itself if the file is missing it. The file has no solutions in it, since the page works them out when needed.

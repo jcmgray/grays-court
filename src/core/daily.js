@@ -3,7 +3,7 @@
 import { generate } from "./generate.js";
 import { makeRng, hashString } from "./rng.js";
 
-export const EPOCH = "2026-10-21";
+export const EPOCH = "2026-10-23";
 export const SIZE = 10;
 export const STARS = 2;
 
