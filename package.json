@@ -1,0 +1,9 @@
+{
+  "name": "grays-court",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "puzzles": "node scripts/make_puzzles.js",
+    "serve": "python3 scripts/serve.py 8000"
+  }
+}

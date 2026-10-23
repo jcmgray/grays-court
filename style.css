@@ -1,0 +1,446 @@
+:root {
+  --bg: #e2e8e9;
+  --card: #f2f5f6;
+  --ink: #26343a;
+  --muted: #6b7d83;
+  --border: #2a3539;
+  /* the board's outer edge */
+  --edge: #000;
+  --accent: #2f7d84;
+  --bad: #e0453a;
+  --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1b2224;
+    --card: #263033;
+    --ink: #e2eaec;
+    --muted: #8da0a6;
+    --accent: #3f9aa1;
+    color-scheme: dark;
+  }
+}
+
+/* grays court sits on medieval greens: pale sage in light mode, dark green in
+   dark mode. all its colours share one slightly blue green hue (144deg) */
+:root[data-look="grays"] {
+  --bg: #d5e2da;
+  --card: #eaf1ec;
+  --ink: #1f3327;
+  --muted: #5e7869;
+  --accent: #498862;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-look="grays"]:not([data-theme="light"]) {
+    --bg: #233229;
+    --card: #2d4336;
+    --ink: #e3ede7;
+    --muted: #9eb3a6;
+    --accent: #509b6e;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  /* quick repeated taps shouldn't zoom the page, pinch zoom still works */
+  touch-action: manipulation;
+}
+
+.app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) 16px 24px;
+}
+
+header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 1.9rem;
+  letter-spacing: 0.01em;
+}
+
+#subtitle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.3rem;
+  color: var(--muted);
+}
+
+.board-wrap {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+}
+
+#board {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 10px;
+  overflow: visible;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.loading[hidden] {
+  display: none;
+}
+
+.status {
+  text-align: center;
+  color: var(--muted);
+  margin: 10px 0;
+  font-size: 0.95rem;
+}
+
+/* board layers */
+
+/* touches land on the svg itself, not the shapes inside it. the shapes are
+   redrawn on every tap, and safari drops the end of a touch whose target was
+   removed, so the double-tap zoom block in app.js never saw it */
+#board * {
+  pointer-events: none;
+}
+
+#board text {
+  font-family: var(--emoji);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.grid line,
+.grid path {
+  fill: none;
+  stroke: #000;
+  stroke-opacity: 0.12;
+  stroke-width: 0.2;
+}
+
+/* --region-border is set by the theme, if it has its own */
+.region-borders line,
+.region-borders path {
+  fill: none;
+  stroke: var(--region-border, var(--border));
+  stroke-width: 0.75;
+  stroke-linecap: round;
+}
+
+.outline {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+/* a new road draws itself in along its length, it needs pathLength="1" */
+.draw {
+  stroke-dasharray: 1;
+  animation: draw 0.6s ease-out both;
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.bad-unit {
+  fill: var(--bad);
+  opacity: 0.22;
+}
+
+.bad-star {
+  fill: var(--bad);
+  fill-opacity: 0.25;
+  stroke: var(--bad);
+  stroke-width: 0.7;
+}
+
+/* hidden until their delay is up, set per element by the renderer */
+.bad-unit,
+.bad-star {
+  animation: appear 0.2s ease-out both;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+.tip-dim {
+  fill: #1b2427;
+  opacity: 0.45;
+}
+
+.tip-blocked,
+.tip-star {
+  fill: none;
+  stroke: #2f6fd6;
+  stroke-width: 0.8;
+}
+
+.tip-star {
+  fill: #fff;
+  fill-opacity: 0.5;
+}
+
+.tip-ghost {
+  opacity: 0.5;
+}
+
+.mistake {
+  fill: none;
+  stroke: #e8892c;
+  stroke-width: 0.8;
+  stroke-dasharray: 1.6 1;
+}
+
+.star {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* each shape of a new castle or farm grows in from its own centre, the
+   renderer staggers them with animation-delay */
+.grow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: grow 0.35s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+@keyframes grow {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+#board.solved .star {
+  animation: bounce 0.6s ease-in-out both;
+}
+
+@keyframes bounce {
+  40% {
+    transform: translateY(-1.6px) scale(1.15);
+  }
+}
+
+/* controls */
+
+.tip-box {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  background: var(--card);
+  border-left: 3px solid #2f6fd6;
+  border-radius: 8px;
+  padding: 8px 6px 8px 12px;
+  margin: 0 0 10px;
+}
+
+.tip-box[hidden] {
+  display: none;
+}
+
+.tip-box p {
+  flex: 1;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+#tip-close {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 10px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.toolbar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.78rem;
+}
+
+.toolbar button span {
+  font-family: var(--emoji);
+  font-size: 1.25rem;
+}
+
+#auto[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, var(--card));
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  padding: 8px 20px;
+}
+
+dialog {
+  background: var(--card);
+  color: var(--ink);
+  border: none;
+  border-radius: 14px;
+  padding: 20px;
+  width: min(420px, calc(100vw - 32px));
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.25);
+}
+
+dialog::backdrop {
+  background: rgb(10 22 26 / 0.4);
+}
+
+dialog h2 {
+  font-family: Georgia, serif;
+  margin: 0 0 10px;
+  font-size: 1.3rem;
+}
+
+dialog ul {
+  padding-left: 20px;
+  line-height: 1.5;
+}
+
+.win-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 1.1rem;
+}
+
+#share-preview {
+  font-family: system-ui, var(--emoji);
+  font-size: 0.85rem;
+  line-height: 1.25;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 10px;
+  white-space: pre;
+  overflow-x: auto;
+  user-select: all;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dialog-buttons form {
+  margin: 0;
+}
+
+.setting {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 16px;
+}
+
+.setting select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.practice {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+a {
+  color: var(--accent);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  transform: translate(-50%, 20px);
+  background: var(--ink);
+  color: var(--bg);
+  padding: 8px 16px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}

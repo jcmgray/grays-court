@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Grays Court</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <div>
+          <h1>Grays Court</h1>
+          <p id="subtitle">&nbsp;</p>
+        </div>
+        <div id="timer" class="timer">0:00</div>
+      </header>
+
+      <div class="board-wrap">
+        <svg id="board" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="puzzle board"></svg>
+        <div id="loading" class="loading">surveying the land…</div>
+      </div>
+
+      <p id="status" class="status">&nbsp;</p>
+      <div id="tip-box" class="tip-box" hidden>
+        <p id="tip-text"></p>
+        <button id="tip-close" aria-label="dismiss tip">✕</button>
+      </div>
+
+      <nav class="toolbar">
+        <button id="undo" disabled><span>↩️</span>undo</button>
+        <button id="redo" disabled><span>↪️</span>redo</button>
+        <button id="auto" aria-pressed="true"><span>🛤️</span>auto</button>
+        <button id="tip"><span>💡</span>tip</button>
+        <button id="check"><span>🔍</span>check</button>
+        <button id="clear"><span>🧹</span>clear</button>
+        <button id="menu"><span>📜</span>more</button>
+      </nav>
+    </main>
+
+    <dialog id="win">
+      <h2><span data-word="done">the realm is complete</span> 🎉</h2>
+      <p class="win-stats"><span id="win-time"></span> <span id="win-streak"></span></p>
+      <pre id="share-preview"></pre>
+      <div class="dialog-buttons">
+        <button id="share" class="primary">share</button>
+        <form method="dialog"><button>close</button></form>
+      </div>
+    </dialog>
+
+    <dialog id="help">
+      <h2>how to play</h2>
+      <ul>
+        <li><span data-word="place">build</span> <b>2 <span data-word="stars">castles</span></b> in every row, column and colour</li>
+        <li><span data-word="stars">castles</span> can't be adjacent</li>
+        <li>tap to cycle <span id="tap-order">farm, castle, clear</span></li>
+        <li>drag to mark lots of cells at once</li>
+        <li><b>auto</b> fills in the cells the <span data-word="stars">castles</span> rule out</li>
+        <li><b>tip</b> shows the next 'easiest' move</li>
+        <li><b>check</b> shows any mistakes so far</li>
+      </ul>
+      <label class="setting"><input type="checkbox" id="castle-first" /> tap once for a <span data-word="star">castle</span> instead</label>
+      <label class="setting">theme <select id="theme"></select></label>
+      <h2>practice</h2>
+      <div class="practice">
+        <button data-practice="easy">easy</button>
+        <button data-practice="medium">medium</button>
+        <button data-practice="hard">hard</button>
+        <button data-practice="expert">expert</button>
+      </div>
+      <p><a href="./">today's puzzle</a></p>
+      <form method="dialog" class="dialog-buttons"><button>close</button></form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="src/ui/app.js"></script>
+  </body>
+</html>
