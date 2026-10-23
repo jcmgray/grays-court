@@ -6,7 +6,7 @@
 // hardest one it needed. the same steps give the in-game tips
 
 import { UNKNOWN, EMPTY, STAR } from "./board.js";
-import { placeStar, propagate, unitCounts } from "./solver.js";
+import { placeStar, unitCounts } from "./solver.js";
 
 export const CONTRADICTION = "contradiction";
 
@@ -235,33 +235,82 @@ function confinement(j) {
   };
 }
 
-// apply the simple techniques until stuck, false on contradiction
-function settle(board, cells) {
+// a unit that can no longer get its stars: overfull, out of room, or with no
+// way left to fit its stars apart. null if there is none
+function brokenUnit(board, cells) {
+  const counts = starCounts(board, cells);
+  for (let ui = 0; ui < board.units.length; ui++) {
+    const [stars, unknown] = unitCounts(board.units[ui], cells);
+    if (stars > board.k || stars + unknown < board.k) return ui;
+  }
+  for (let ui = 0; ui < board.units.length; ui++) {
+    if (counts[ui] < board.k && placements(board, cells, ui, counts).length === 0) return ui;
+  }
+  return null;
+}
+
+// the simple techniques a trial follows on with, and whether each counts as
+// a step in its chain
+const FOLLOW = [
+  ["neighbours", neighbours, false],
+  ["full", full, false],
+  ["forced", forced, true],
+  ["squeeze", squeeze, true],
+];
+
+// guess `value` in unknown cell i, then follow on with the simple techniques
+// one at a time. gives {steps, chain, broken} if that hits a contradiction
+// within maxSteps counted steps, where chain lists those steps and broken is
+// the unit that ends up with no room, or null if it doesn't
+function trial(board, cells, i, value, maxSteps) {
+  const c = cells.slice();
+  const chain = [];
+  const fail = () => ({ steps: chain.length, chain, broken: brokenUnit(board, c) });
+  if (value === STAR) {
+    if (!placeStar(board, c, i)) return fail();
+  } else {
+    c[i] = EMPTY;
+  }
   while (true) {
-    if (!propagate(board, cells)) return false;
-    const r = squeeze(board, cells);
-    if (r === CONTRADICTION) return false;
-    if (!r) return true;
+    let progressed = false;
+    for (const [name, apply, counted] of FOLLOW) {
+      const r = apply(board, c);
+      if (r === CONTRADICTION) return fail();
+      if (!r) continue;
+      if (counted) {
+        chain.push({ technique: name, reason: r });
+        if (chain.length > maxSteps) return null;
+      }
+      progressed = true;
+      break;
+    }
+    if (!progressed) return null;
   }
 }
 
-// try a star (or empty) in a cell, and rule it out if the simple techniques
-// then hit a contradiction
-function lookahead(board, cells) {
-  for (let i = 0; i < board.N; i++) {
-    if (cells[i] !== UNKNOWN) continue;
-    const a = cells.slice();
-    if (!placeStar(board, a, i) || !settle(board, a)) {
-      cells[i] = EMPTY;
-      return { cell: i, tried: STAR };
+// trial steps up to this many count as a short trial, which is hard, longer
+// ones are expert
+const SHORT_TRIAL = 2;
+const LONG_TRIAL = 40;
+
+// try a star, or empty, in each unknown cell, and rule it out if following
+// on with the simple techniques hits a contradiction within maxSteps steps.
+// picks the trial with the shortest chain, as the easiest to follow
+function trialStep(maxSteps) {
+  return (board, cells) => {
+    let best = null;
+    for (let i = 0; i < board.N && !(best && best.steps === 0); i++) {
+      if (cells[i] !== UNKNOWN) continue;
+      for (const value of [STAR, EMPTY]) {
+        const t = trial(board, cells, i, value, best ? best.steps - 1 : maxSteps);
+        if (t) best = { ...t, cell: i, tried: value };
+      }
     }
-    const b = cells.slice();
-    b[i] = EMPTY;
-    if (!settle(board, b)) {
-      return placeStar(board, cells, i) ? { cell: i, tried: EMPTY } : CONTRADICTION;
-    }
-  }
-  return false;
+    if (!best) return false;
+    if (best.tried === STAR) cells[best.cell] = EMPTY;
+    else if (!placeStar(board, cells, best.cell)) return CONTRADICTION;
+    return best;
+  };
 }
 
 export const TECHNIQUES = [
@@ -275,7 +324,8 @@ export const TECHNIQUES = [
   { name: "pointing-big", level: 3, weight: 7, apply: pointing(SMALL_SPLIT, Infinity) },
   { name: "confine3", level: 4, weight: 9, apply: confinement(3) },
   { name: "confine4", level: 4, weight: 12, apply: confinement(4) },
-  { name: "lookahead", level: 5, weight: 15, apply: lookahead },
+  { name: "trial", level: 4, weight: 10, apply: trialStep(SHORT_TRIAL) },
+  { name: "trial-long", level: 5, weight: 15, apply: trialStep(LONG_TRIAL) },
 ];
 
 // make one deduction in place with the easiest technique that works, giving
@@ -304,18 +354,21 @@ export function solveLogically(board, { maxLevel = 5, start = null } = {}) {
   const steps = [];
   let score = 0;
   let level = 0;
+  // the most steps any trial needed to reach its contradiction, -1 if none
+  let longestTrial = -1;
 
   while (cells.includes(UNKNOWN)) {
     const step = nextStep(board, cells, maxLevel);
     if (step === null || step === CONTRADICTION) {
       const contradiction = step === CONTRADICTION;
-      return { solved: false, contradiction, cells, counts, steps, score, level };
+      return { solved: false, contradiction, cells, counts, steps, score, level, longestTrial };
     }
     const t = step.technique;
     steps.push({ technique: t.name, changed: step.changed });
     counts[t.name] = (counts[t.name] || 0) + 1;
     score += t.weight;
     level = Math.max(level, t.level);
+    if (t.name.startsWith("trial")) longestTrial = Math.max(longestTrial, step.reason.steps);
   }
-  return { solved: true, contradiction: false, cells, counts, steps, score, level };
+  return { solved: true, contradiction: false, cells, counts, steps, score, level, longestTrial };
 }

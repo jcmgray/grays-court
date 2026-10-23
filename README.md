@@ -26,7 +26,7 @@ This fills `puzzles/daily.json` with one puzzle per day and keeps dates already 
   - `generate.js` random puzzles with a unique solution
   - `solver.js` exact solver, used to prove a puzzle is unique
   - `logic.js` human style solver, used to grade difficulty
-  - `daily.js` tiers, the weekday ramp (easy on Mon/Tue up to expert on Sun) and seeding
+  - `daily.js` tiers, the weekday ramp (easy on Mon/Tue up to hard Fri to Sun, expert is for practice only) and seeding
   - `rules.js` auto roads, rule breaks and mistakes during play
 - `src/ui/` has the page: `app.js` for input, undo and sharing, and `render.js` for the svg board, kept apart so another renderer can replace it
   - `themes.js` how stars and blocked cells look and the words used for them, picked in the menu

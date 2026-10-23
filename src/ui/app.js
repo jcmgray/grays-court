@@ -4,9 +4,9 @@ import { makeBoard, decodeRegions, UNKNOWN, EMPTY, STAR } from "../core/board.js
 import { findSolutions } from "../core/solver.js";
 import { nextStep, pointingCases, CONTRADICTION } from "../core/logic.js";
 import { BLANK, ROAD, CASTLE, impliedRoads, ruleBreaks, mistakes, isSolved } from "../core/rules.js";
-import { TIERS, dateKey, dayNumber, puzzleForDate, practicePuzzle } from "../core/daily.js";
-import { makeRng, hashString, shuffle } from "../core/rng.js";
-import { BIOMES } from "./biomes.js";
+import { EPOCH, TIERS, dateKey, dayNumber, tierForDate, puzzleForDate, practicePuzzle } from "../core/daily.js";
+import { makeRng, hashString } from "../core/rng.js";
+import { biomesFor } from "./biomes.js";
 import { THEMES, DEFAULT_THEME } from "./themes.js";
 import { createRenderer } from "./render.js";
 
@@ -57,7 +57,9 @@ async function loadPuzzle() {
     const seed = Number(params.get("seed")) || Math.floor(Math.random() * 1e9);
     return { ...practicePuzzle(tier, seed), seed };
   }
-  const key = params.get("date") || dateKey();
+  // past days can be played, but not ones still to come
+  const asked = params.get("date");
+  const key = asked && asked <= dateKey() ? asked : dateKey();
   try {
     const res = await fetch("puzzles/daily.json");
     const p = res.ok && (await res.json()).puzzles[key];
@@ -122,8 +124,11 @@ function draw() {
   $("auto").setAttribute("aria-pressed", String(settings.autoRoads));
 }
 
+// the board's regions go in with the save, so a save for a puzzle that has
+// since changed isn't laid over the new one
 function save() {
   store.set(saveKey, {
+    regions: puzzle.regions,
     play: Array.from(play).join(""),
     undoStack,
     redoStack,
@@ -258,12 +263,8 @@ function check() {
   const wrong = mistakes(board, play, solution);
   used.checks++;
   clearHints();
-  shownMistakes = new Set(wrong);
-  toast(
-    wrong.length === 0
-      ? "no mistakes so far ✨"
-      : `${wrong.length} cell${wrong.length > 1 ? "s" : ""} not quite right`,
-  );
+  // just says whether anything is wrong, not where
+  toast(wrong.length === 0 ? "all looks right!" : "something's wrong...");
   save();
   draw();
 }
@@ -326,10 +327,26 @@ function tipText(step, before) {
       const cases = parts.length > 1 ? `either ${parts.join(", or ")}` : parts[0];
       return `${name} needs ${more(m)}. however ${it} go${m === 1 ? "es" : ""}, ${cases}. so the marked cell is ${w.blocked}.`;
     }
-    case "lookahead":
-      return reason.tried === STAR
-        ? `try a ${w.star} in the marked cell: following the forced moves from there leaves some row, column or ${w.region} with no room. so it must be ${w.blocked}.`
-        : `try a ${w.blockedOne} in the marked cell: following the forced moves from there leaves some row, column or ${w.region} with no room. so it must be a ${w.star}.`;
+    case "trial":
+    case "trial-long": {
+      // walk through the chain of moves, or just count them if it's long
+      const guess = reason.tried === STAR ? `a ${w.star}` : `a ${w.blockedOne}`;
+      const answer = reason.tried === STAR ? w.blocked : `a ${w.star}`;
+      const end =
+        reason.broken === null
+          ? `there's no room left somewhere`
+          : `${unitName(reason.broken)} is left with no room for its ${w.stars}`;
+      const move = ({ technique, reason: r }) => {
+        const n = unitName(r.units[0]);
+        if (technique === "forced") return `${n} has to fill its last free cells`;
+        return r.stars.length ? `${n} is forced to ${w.place} a ${w.star}` : `${n} rules out some of its cells`;
+      };
+      let middle;
+      if (reason.steps === 0) middle = `straight away ${end}`;
+      else if (reason.steps <= 3) middle = `then ${reason.chain.map(move).join(", then ")}, and ${end}`;
+      else middle = `${reason.steps} forced moves later, ${end}`;
+      return `try ${guess} in the marked cell: ${middle}. so it must be ${answer}.`;
+    }
     default: {
       // the confine techniques
       const a = reason.units;
@@ -377,11 +394,16 @@ function giveTip() {
   } else {
     step.after = after;
     const name = step.technique.name;
-    // a lookahead is about one cell, not the moves that follow from it, and a
-    // pointing step is explained for one of its cells at a time
+    // a trial is about one cell, not the moves that follow from it, lighting
+    // up the units its chain runs through, and a pointing step is explained
+    // for one of its cells at a time
     let cells = step.changed;
     let others = step.reason.others || [];
-    if (name === "lookahead") cells = [step.reason.cell];
+    if (name === "trial" || name === "trial-long") {
+      cells = [step.reason.cell];
+      others = step.reason.chain.map((m) => m.reason.units[0]);
+      if (step.reason.broken !== null) others.push(step.reason.broken);
+    }
     if (name === "pointing" || name === "pointing-big") {
       const target = step.reason.targets[0];
       step.cases = pointingCases(board, before, step.reason.units[0], target);
@@ -519,6 +541,60 @@ function toast(msg) {
   toastId = setTimeout(() => el.classList.remove("show"), 2200);
 }
 
+// calendar of daily puzzles, from the first day up to today. solved days
+// are filled in, started ones dashed, and tapping a day plays it
+let calendarMonth = null;
+
+function drawCalendar() {
+  const today = dateKey();
+  const [y, m] = calendarMonth;
+  const first = new Date(y, m, 1);
+  const days = new Date(y, m + 1, 0).getDate();
+  $("calendar-title").textContent = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  const solvedDays = store.get("gc:stats", { solved: {} }).solved;
+  let html = ["M", "T", "W", "T", "F", "S", "S"].map((d) => `<span class="weekday">${d}</span>`).join("");
+  // monday first
+  for (let k = 0; k < (first.getDay() + 6) % 7; k++) html += "<span></span>";
+  for (let d = 1; d <= days; d++) {
+    const key = dateKey(new Date(y, m, d));
+    const playable = key >= EPOCH && key <= today;
+    const saved = store.get(`gc:play:${key}`, null);
+    const cls = [
+      solvedDays[key] ? "solved" : saved && saved.regions && /[12]/.test(saved.play) ? "started" : "",
+      key === today ? "today" : "",
+      puzzle && key === puzzle.date ? "current" : "",
+    ].join(" ");
+    const tier = playable ? `<small>${TIERS[tierForDate(key)].name}</small>` : "";
+    html += `<button class="${cls}" data-date="${key}"${playable ? "" : " disabled"}>${d}${tier}</button>`;
+  }
+  $("calendar-grid").innerHTML = html;
+
+  const month = (key) => key.slice(0, 7);
+  const shown = `${y}-${String(m + 1).padStart(2, "0")}`;
+  $("calendar-prev").disabled = shown <= month(EPOCH);
+  $("calendar-next").disabled = shown >= month(today);
+}
+
+$("calendar-open").addEventListener("click", () => {
+  const d = new Date(`${puzzle?.date ?? dateKey()}T12:00:00`);
+  calendarMonth = [d.getFullYear(), d.getMonth()];
+  drawCalendar();
+  $("calendar").showModal();
+});
+for (const [id, step] of [["calendar-prev", -1], ["calendar-next", 1]]) {
+  $(id).addEventListener("click", () => {
+    const d = new Date(calendarMonth[0], calendarMonth[1] + step, 1);
+    calendarMonth = [d.getFullYear(), d.getMonth()];
+    drawCalendar();
+  });
+}
+$("calendar-grid").addEventListener("click", (e) => {
+  const key = e.target.closest("button")?.dataset.date;
+  if (!key) return;
+  location.href = key === dateKey() ? "./" : `./?date=${key}`;
+});
+
 // buttons and keys
 $("undo").addEventListener("click", undo);
 $("redo").addEventListener("click", redo);
@@ -585,13 +661,11 @@ async function main() {
   board = makeBoard(puzzle.n, puzzle.k, decodeRegions(puzzle.regions));
   saveKey = puzzle.date ? `gc:play:${puzzle.date}` : `gc:play:practice:${puzzle.tier}:${puzzle.seed}`;
 
-  const rng = makeRng(hashString(puzzle.regions));
-  const order = shuffle(rng, BIOMES.map((_, i) => i));
-  biomes = Array.from({ length: board.nregions }, (_, g) => BIOMES[order[g % BIOMES.length]]);
+  biomes = biomesFor(board, makeRng(hashString(puzzle.regions)));
 
   const saved = store.get(saveKey, null);
   play = new Uint8Array(board.N);
-  if (saved) {
+  if (saved && saved.regions === puzzle.regions) {
     Array.from(saved.play).forEach((ch, i) => (play[i] = Number(ch)));
     ({ undoStack, redoStack, elapsed, solved } = saved);
     used = { ...used, ...saved.used };

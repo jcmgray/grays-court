@@ -199,6 +199,7 @@ export function generateOnce(rng, n, k) {
     level: grade.level,
     score: grade.score,
     counts: grade.counts,
+    longestTrial: grade.longestTrial,
   };
 }
 

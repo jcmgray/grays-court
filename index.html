@@ -14,7 +14,10 @@
           <h1>Grays Court</h1>
           <p id="subtitle">&nbsp;</p>
         </div>
-        <div id="timer" class="timer">0:00</div>
+        <div class="header-right">
+          <button id="calendar-open" class="icon-button" aria-label="past puzzles">📅</button>
+          <div id="timer" class="timer">0:00</div>
+        </div>
       </header>
 
       <div class="board-wrap">
@@ -58,7 +61,7 @@
         <li>drag to mark lots of cells at once</li>
         <li><b>auto</b> fills in the cells the <span data-word="stars">castles</span> rule out</li>
         <li><b>tip</b> shows the next 'easiest' move</li>
-        <li><b>check</b> shows any mistakes so far</li>
+        <li><b>check</b> says whether anything's wrong so far</li>
       </ul>
       <label class="setting"><input type="checkbox" id="castle-first" /> tap once for a <span data-word="star">castle</span> instead</label>
       <label class="setting">theme <select id="theme"></select></label>
@@ -70,6 +73,17 @@
         <button data-practice="expert">expert</button>
       </div>
       <p><a href="./">today's puzzle</a></p>
+      <form method="dialog" class="dialog-buttons"><button>close</button></form>
+    </dialog>
+
+    <dialog id="calendar">
+      <div class="calendar-head">
+        <button id="calendar-prev" aria-label="previous month">‹</button>
+        <h2 id="calendar-title"></h2>
+        <button id="calendar-next" aria-label="next month">›</button>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+      <p class="calendar-key"><span class="key solved"></span> solved <span class="key started"></span> started</p>
       <form method="dialog" class="dialog-buttons"><button>close</button></form>
     </dialog>
 

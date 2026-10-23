@@ -175,7 +175,7 @@ export const THEMES = {
     // side to keep it clear of the plots it runs over
     road(d, biome) {
       const land = landColour(biome.color);
-      const colour = mixColour(land, "#000000", 0.4);
+      const colour = mixColour(land, "#000000", 0.5);
       const line = (stroke, width) =>
         `<path d="${d}" pathLength="1" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
       return line(land, 2.6) + line(colour, 1.3);
@@ -188,7 +188,7 @@ export const THEMES = {
         plots = fieldPlots(rng, [x - 4.3, y - 4.3, x + 4.3, y + 4.3], 0, []);
       }
       return plots
-        .map((box) => wobbly(rng, box, 0.3, 'fill="#000" fill-opacity="0.4"'))
+        .map((box) => wobbly(rng, box, 0.3, 'fill="#000" fill-opacity="0.5"'))
         .join("");
     },
     regionName: (biome) => biome.label,

@@ -10,13 +10,16 @@ export const STARS = 2;
 // first matching tier wins, calibrated from the logic solver's grades
 export const TIERS = [
   { name: "easy", test: (p) => p.level <= 2 },
-  { name: "medium", test: (p) => p.level <= 4 || (p.counts.lookahead || 0) <= 3 },
-  { name: "hard", test: (p) => (p.counts.lookahead || 0) <= 12 },
+  { name: "medium", test: (p) => p.level <= 3 || (p.level === 4 && (p.counts.trial || 0) <= 2) },
+  // a trial of more than 5 steps is too much to hold in your head, and more
+  // than 3 trials of 3 or more steps is a slog
+  { name: "hard", test: (p) => p.longestTrial <= 5 && (p.counts["trial-long"] || 0) <= 3 },
   { name: "expert", test: () => true },
 ];
 
-// sunday first, as Date.getUTCDay counts
-const WEEKDAY_TIERS = [3, 0, 0, 1, 1, 2, 2];
+// sunday first, as Date.getUTCDay counts. no expert days for now, that tier
+// is only for practice
+const WEEKDAY_TIERS = [2, 0, 0, 1, 1, 2, 2];
 
 export function tierOf(p) {
   return TIERS.findIndex((t) => t.test(p));

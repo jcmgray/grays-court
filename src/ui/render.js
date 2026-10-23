@@ -18,28 +18,45 @@ const CELL_STAGGER = 15;
 
 const centre = (board, i) => [board.colOf(i) * S + S / 2, board.rowOf(i) * S + S / 2];
 
-// a shortest path of cells from a to b that stays inside their region. it
-// can step diagonally, but only where both cells beside the step are in the
-// region too, so it never cuts across a corner of another region
+// a shortest path of cells from a to b that stays inside their region,
+// stepping only up, down, left or right. of the shortest paths it takes one
+// with the fewest turns, so castles in a line get a straight road
 function regionPath(board, a, b) {
+  const n = board.n;
   const g = board.regions[a];
-  const inside = (i) => board.regions[i] === g;
-  const from = new Map([[a, -1]]);
-  const queue = [a];
+  const steps = [-n, n, -1, 1];
+  // search over (cell, direction came in), costing 1000 a step and 1 a turn
+  const key = (i, d) => i * 4 + d;
+  const best = new Map();
+  const from = new Map();
+  let queue = [];
+  for (let d = 0; d < 4; d++) {
+    best.set(key(a, d), 0);
+    queue.push([0, a, d]);
+  }
+  let end = null;
   while (queue.length) {
-    const i = queue.shift();
-    if (i === b) break;
-    for (const j of board.neighbours[i]) {
-      if (from.has(j) || !inside(j)) continue;
-      const corner1 = board.rowOf(i) * board.n + board.colOf(j);
-      const corner2 = board.rowOf(j) * board.n + board.colOf(i);
-      if (!inside(corner1) || !inside(corner2)) continue;
-      from.set(j, i);
-      queue.push(j);
+    queue.sort((x, y) => x[0] - y[0]);
+    const [cost, i, d] = queue.shift();
+    if (cost > best.get(key(i, d))) continue;
+    if (i === b) {
+      end = key(i, d);
+      break;
+    }
+    for (let e = 0; e < 4; e++) {
+      const j = i + steps[e];
+      if (j < 0 || j >= board.N || board.regions[j] !== g) continue;
+      if (Math.abs(board.colOf(j) - board.colOf(i)) > 1) continue;
+      const next = cost + 1000 + (e === d || i === a ? 0 : 1);
+      if (next < (best.get(key(j, e)) ?? Infinity)) {
+        best.set(key(j, e), next);
+        from.set(key(j, e), key(i, d));
+        queue.push([next, j, e]);
+      }
     }
   }
   const path = [];
-  for (let i = b; i !== -1 && i !== undefined; i = from.get(i)) path.push(i);
+  for (let k = end; k !== undefined; k = from.get(k)) path.push(Math.floor(k / 4));
   return path.reverse();
 }
 
