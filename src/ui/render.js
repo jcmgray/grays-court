@@ -117,17 +117,22 @@ export function createRenderer(svg) {
   let regionEdges = [];
   let gridEdges = [];
 
-  function drawStatic(board, biomes) {
-    const n = board.n;
-    svg.setAttribute("viewBox", `-1 -1 ${n * S + 2} ${n * S + 2}`);
+  // each cell in its region's colour, from the theme if it has its own
+  function drawLand(board, theme, biomes) {
     let b = "";
     for (let i = 0; i < board.N; i++) {
       const x = board.colOf(i) * S;
       const y = board.rowOf(i) * S;
-      const fill = landColour(biomes[board.regions[i]].color);
+      const biome = biomes[board.regions[i]];
+      const fill = theme.land ? theme.land(biome) : landColour(biome.color);
       b += `<rect x="${x}" y="${y}" width="${S}" height="${S}" fill="${fill}"/>`;
     }
     base.innerHTML = b;
+  }
+
+  function drawStatic(board) {
+    const n = board.n;
+    svg.setAttribute("viewBox", `-1 -1 ${n * S + 2} ${n * S + 2}`);
 
     // the cell edges, for drawBorders
     regionEdges = [];
@@ -211,11 +216,12 @@ export function createRenderer(svg) {
   function render(model) {
     const { board, theme, biomes, display, breaks, mistakes, tip, solved } = model;
     if (staticFor !== board) {
-      drawStatic(board, biomes);
+      drawStatic(board);
       staticFor = board;
       seeds = Array.from({ length: board.N }, (_, i) => hashString(`${board.regions}:${i}`));
     }
     svg.style.setProperty("--region-border", theme.regionBorder ?? "");
+    svg.style.setProperty("--region-width", theme.regionWidth ?? "");
     if (piecesFor !== `${board.regions}:${theme.label}`) {
       starLayer.innerHTML = "";
       starTopLayer.innerHTML = "";
@@ -227,6 +233,7 @@ export function createRenderer(svg) {
       roadEls = new Map();
       piecesFor = `${board.regions}:${theme.label}`;
       animate = false;
+      drawLand(board, theme, biomes);
       drawBorders(board, theme);
     }
 

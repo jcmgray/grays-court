@@ -23,9 +23,11 @@
   }
 }
 
-/* grays court sits on medieval greens: pale sage in light mode, dark green in
-   dark mode. all its colours share one slightly blue green hue (144deg) */
-:root[data-look="grays"] {
+/* grays court and the shire sit on medieval greens: pale sage in light mode,
+   dark green in dark mode. all these colours share one slightly blue green
+   hue (144deg) */
+:root[data-look="grays"],
+:root[data-look="shire"] {
   --bg: #d5e2da;
   --card: #eaf1ec;
   --ink: #1f3327;
@@ -35,7 +37,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root[data-look="grays"]:not([data-theme="light"]) {
+  :root[data-look="grays"]:not([data-theme="light"]),
+  :root[data-look="shire"]:not([data-theme="light"]) {
     --bg: #233229;
     --card: #2d4336;
     --ink: #e3ede7;
@@ -256,12 +259,12 @@ h1 {
   stroke-width: 0.2;
 }
 
-/* --region-border is set by the theme, if it has its own */
+/* --region-border and --region-width are set by the theme, if it has its own */
 .region-borders line,
 .region-borders path {
   fill: none;
   stroke: var(--region-border, var(--border));
-  stroke-width: 0.75;
+  stroke-width: var(--region-width, 0.75);
   stroke-linecap: round;
 }
 
