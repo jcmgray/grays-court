@@ -235,6 +235,15 @@ h1 {
   font-size: 0.95rem;
 }
 
+.reshare {
+  text-align: center;
+  margin: -2px 0 10px;
+}
+
+.reshare button[hidden] {
+  display: none;
+}
+
 /* board layers */
 
 /* touches land on the svg itself, not the shapes inside it. the shapes are

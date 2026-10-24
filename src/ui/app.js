@@ -119,6 +119,8 @@ function draw() {
   $("status").textContent = solved
     ? w.done
     : `${stars} of ${board.n * board.k} ${w.stars} ${w.placed}`;
+  // once solved, the share screen can be opened again from here
+  $("reshare").hidden = !solved;
   $("undo").disabled = solved || undoStack.length === 0;
   $("redo").disabled = solved || redoStack.length === 0;
   $("auto").setAttribute("aria-pressed", String(settings.autoRoads));
@@ -613,6 +615,7 @@ $("auto").addEventListener("click", () => {
 });
 $("menu").addEventListener("click", () => $("help").showModal());
 $("share").addEventListener("click", share);
+$("reshare").addEventListener("click", showWin);
 $("theme").innerHTML = Object.entries(THEMES)
   .map(([key, t]) => `<option value="${key}">${t.label}</option>`)
   .join("");
