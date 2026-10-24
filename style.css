@@ -266,6 +266,7 @@ h1 {
   stroke: var(--region-border, var(--border));
   stroke-width: var(--region-width, 0.75);
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .outline {

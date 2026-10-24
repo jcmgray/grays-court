@@ -60,6 +60,53 @@ function regionPath(board, a, b) {
   return path.reverse();
 }
 
+// join edges [x1, y1, x2, y2] that meet end to end into as few lines as
+// possible, so borders bend round their corners in one piece rather than
+// being separate bits that just touch. each line is a list of its edges,
+// each pointed the way the line runs. lines start at points where the count
+// of edges is odd, and carry on straight through junctions where they can
+function chains(edges) {
+  const key = (x, y) => `${x},${y}`;
+  const at = new Map();
+  edges.forEach((e, k) => {
+    for (const p of [key(e[0], e[1]), key(e[2], e[3])]) {
+      if (!at.has(p)) at.set(p, []);
+      at.get(p).push(k);
+    }
+  });
+  const used = new Uint8Array(edges.length);
+  const walk = (k, start) => {
+    const line = [];
+    let p = start;
+    let dir = null;
+    while (k !== undefined) {
+      used[k] = 1;
+      const e = edges[k];
+      const d = key(e[0], e[1]) === p ? e : [e[2], e[3], e[0], e[1]];
+      line.push(d);
+      p = key(d[2], d[3]);
+      dir = [d[2] - d[0], d[3] - d[1]];
+      const next = at.get(p).filter((j) => !used[j]);
+      const straight = next.find((j) => {
+        const f = edges[j];
+        const g = key(f[0], f[1]) === p ? f : [f[2], f[3], f[0], f[1]];
+        return g[2] - g[0] === dir[0] && g[3] - g[1] === dir[1];
+      });
+      k = straight ?? next[0];
+    }
+    return line;
+  };
+  const out = [];
+  const ends = [...at.keys()].filter((p) => at.get(p).length % 2);
+  for (const p of ends) {
+    for (const k of at.get(p)) if (!used[k]) out.push(walk(k, p));
+  }
+  edges.forEach((e, k) => {
+    if (!used[k]) out.push(walk(k, key(e[0], e[1])));
+  });
+  return out;
+}
+
 export function createRenderer(svg) {
   // region borders go near the end so they stay on top, for play, with only
   // the bits of stars meant to sit over them, and the board edge, above
@@ -183,11 +230,12 @@ export function createRenderer(svg) {
       }
       return pts;
     };
-    const draw = (e) => {
-      if (!wobble) return `<line x1="${e[0]}" y1="${e[1]}" x2="${e[2]}" y2="${e[3]}"/>`;
-      return `<path d="M${e[0]} ${e[1]} L${wave(e).join(" L")}"/>`;
+    // a line of edges as one path, wavy or straight
+    const draw = (line) => {
+      const pts = line.flatMap((e) => (wobble ? wave(e) : [`${e[2]} ${e[3]}`]));
+      return `<path d="M${line[0][0]} ${line[0][1]} L${pts.join(" L")}"/>`;
     };
-    grid.innerHTML = gridEdges.map(draw).join("");
+    grid.innerHTML = chains(gridEdges).map(draw).join("");
 
     // the board edge, as one wavy loop of cell edges round the outside, a
     // bit calmer than the lines inside
@@ -206,7 +254,7 @@ export function createRenderer(svg) {
       }
       outline = `<path class="outline" d="M0 0 L${pts.join(" L")} Z"/>`;
     }
-    regionLayer.innerHTML = `<g class="region-borders">${regionEdges.map(draw).join("")}</g>`;
+    regionLayer.innerHTML = `<g class="region-borders">${chains(regionEdges).map(draw).join("")}</g>`;
     edgeLayer.innerHTML = outline;
   }
 
