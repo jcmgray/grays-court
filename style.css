@@ -27,7 +27,8 @@
    dark green in dark mode. all these colours share one slightly blue green
    hue (144deg) */
 :root[data-look="grays"],
-:root[data-look="shire"] {
+:root[data-look="shire"],
+:root[data-look="diorama"] {
   --bg: #d5e2da;
   --card: #eaf1ec;
   --ink: #1f3327;
@@ -38,7 +39,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root[data-look="grays"]:not([data-theme="light"]),
-  :root[data-look="shire"]:not([data-theme="light"]) {
+  :root[data-look="shire"]:not([data-theme="light"]),
+  :root[data-look="diorama"]:not([data-theme="light"]) {
     --bg: #233229;
     --card: #2d4336;
     --ink: #e3ede7;
@@ -198,10 +200,14 @@ h1 {
   margin-left: 0;
 }
 
+/* on a big screen the board grows past the column, as far as it can while
+   the header and toolbar still fit on screen with it */
 .board-wrap {
+  --size: max(100%, min(900px, 100vw - 32px, 100svh - 280px));
   position: relative;
   aspect-ratio: 1;
-  width: 100%;
+  width: var(--size);
+  margin-left: calc((100% - var(--size)) / 2);
 }
 
 #board {
@@ -226,6 +232,37 @@ h1 {
 
 .loading[hidden] {
   display: none;
+}
+
+#board[hidden],
+.board3d[hidden],
+.time-setting[hidden] {
+  display: none;
+}
+
+.board-wrap {
+  touch-action: none;
+}
+
+.board3d {
+  position: absolute;
+  inset: 0;
+}
+
+.board3d canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+
+.time-setting {
+  flex-wrap: wrap;
+}
+
+.time-setting input[type="range"] {
+  flex: 1;
+  min-width: 120px;
 }
 
 .status {

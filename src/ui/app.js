@@ -33,6 +33,8 @@ const settings = {
   autoRoads: true,
   castleFirst: false,
   theme: DEFAULT_THEME,
+  followClock: true,
+  hour: 17,
   ...store.get("gc:settings", {}),
 };
 const saveSettings = () => store.set("gc:settings", settings);
@@ -91,7 +93,30 @@ function clearHints() {
 }
 
 const svg = $("board");
-const renderer = createRenderer(svg);
+const surface = $("board-wrap");
+const flat = createRenderer(svg);
+// the 3d renderer, loaded the first time a 3d theme is picked, so the other
+// themes never fetch three.js
+let deep = null;
+let renderer = flat;
+
+async function useRenderer() {
+  if (theme().renderer === "3d") {
+    try {
+      deep ??= (await import("./render3d.js")).createRenderer3d($("board3d"));
+      renderer = deep;
+    } catch {
+      toast("couldn't load the 3d board, showing it flat");
+      renderer = flat;
+    }
+  } else {
+    renderer = flat;
+  }
+  // toggleAttribute, as svg elements don't hide through the hidden property
+  svg.toggleAttribute("hidden", renderer !== flat);
+  $("board3d").hidden = renderer !== deep;
+  $("time-setting").hidden = theme().renderer !== "3d";
+}
 
 function display() {
   if (solved) return play.map((v) => (v === CASTLE ? CASTLE : ROAD));
@@ -111,6 +136,7 @@ function draw() {
     mistakes: shownMistakes,
     tip,
     solved,
+    hour: settings.followClock ? null : settings.hour,
   });
   $("tip-text").textContent = tip ? tip.text : "";
   $("tip-box").hidden = !tip;
@@ -162,14 +188,63 @@ function setCell(i, value) {
   play[i] = value;
 }
 
-svg.addEventListener("pointerdown", (e) => {
-  if (!board || solved || e.button > 0) return;
-  const i = renderer.cellAt(board, e);
-  if (i < 0) return;
+// on the 3d board, a tap builds, and dragging moves the view round its
+// centre instead of marking cells: one finger (or the mouse) turns and tilts
+// it, and pinching with two fingers (or the mouse wheel) zooms
+const TAP_SLOP = 8;
+let pinching = null;
+let dragging = null;
+const touches = new Map();
+// how far apart the first two fingers down are
+const touchGap = () => {
+  const [a, b] = [...touches.values()];
+  return b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 0;
+};
+
+surface.addEventListener("contextmenu", (e) => renderer === deep && e.preventDefault());
+
+surface.addEventListener(
+  "wheel",
+  (e) => {
+    if (renderer !== deep) return;
+    e.preventDefault();
+    deep.zoomBy(Math.exp(e.deltaY * 0.0015));
+  },
+  { passive: false },
+);
+
+surface.addEventListener("pointerdown", (e) => {
+  if (!board) return;
+  if (e.pointerType === "touch") {
+    // the first finger of a new touch, so any left over from a missed lift
+    // are stale
+    if (e.isPrimary) touches.clear();
+    touches.set(e.pointerId, [e.clientX, e.clientY]);
+  }
+  if (renderer === deep && touches.size === 2) {
+    e.preventDefault();
+    dragging = null;
+    pinching = { gap: touchGap() };
+    return;
+  }
+  if (e.button > (renderer === deep ? 2 : 0)) return;
   e.preventDefault();
   try {
-    svg.setPointerCapture(e.pointerId);
+    surface.setPointerCapture(e.pointerId);
   } catch {}
+  if (renderer === deep) {
+    // a tap or a turn, decided once the pointer lifts or moves far enough
+    dragging = { start: [e.clientX, e.clientY], at: [e.clientX, e.clientY], moved: false, button: e.button };
+    return;
+  }
+  startCell(e);
+});
+
+// start changing the cell under a pointer, if there is one
+function startCell(e) {
+  if (solved) return false;
+  const i = renderer.cellAt(board, e);
+  if (i < 0) return false;
   const disp = display();
   const to = nextState(i, disp);
   gesture = { from: disp[i], to, changes: new Map(), last: [e.clientX, e.clientY] };
@@ -177,9 +252,25 @@ svg.addEventListener("pointerdown", (e) => {
   startTimer();
   clearHints();
   draw();
-});
+  return true;
+}
 
-svg.addEventListener("pointermove", (e) => {
+surface.addEventListener("pointermove", (e) => {
+  if (pinching) {
+    touches.set(e.pointerId, [e.clientX, e.clientY]);
+    const gap = touchGap();
+    if (gap && pinching.gap) deep.zoomBy(pinching.gap / gap);
+    pinching.gap = gap;
+    return;
+  }
+  if (dragging) {
+    const [sx, sy] = dragging.start;
+    if (!dragging.moved && Math.hypot(e.clientX - sx, e.clientY - sy) < TAP_SLOP) return;
+    dragging.moved = true;
+    deep.orbit(e.clientX - dragging.at[0], e.clientY - dragging.at[1]);
+    dragging.at = [e.clientX, e.clientY];
+    return;
+  }
   if (!gesture || gesture.to === CASTLE) return;
   // sample along the path since the last event, so fast drags miss no cells
   const [x0, y0] = gesture.last;
@@ -207,14 +298,33 @@ function endGesture() {
   afterChange();
 }
 
-svg.addEventListener("pointerup", endGesture);
-svg.addEventListener("pointercancel", endGesture);
+function endPointer(e) {
+  touches.delete(e.pointerId);
+  if (pinching) {
+    if (touches.size === 0) pinching = null;
+    return;
+  }
+  if (dragging) {
+    // a quick second tap can end in pointercancel rather than pointerup, so
+    // either counts, as long as it didn't move
+    const tapped = !dragging.moved && dragging.button === 0;
+    const [x, y] = dragging.start;
+    dragging = null;
+    if (tapped && startCell({ clientX: x, clientY: y })) endGesture();
+    return;
+  }
+  endGesture();
+}
+
+surface.addEventListener("pointerup", endPointer);
+surface.addEventListener("pointercancel", endPointer);
 
 // ios safari can still double-tap zoom on the board despite touch-action,
 // cancelling the touch events themselves stops it. this relies on touches
-// targeting the svg itself, see #board * in style.css
+// targeting the svg or 3d canvas itself, which are never redrawn, see
+// #board * in style.css
 for (const type of ["touchstart", "touchend"]) {
-  svg.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  surface.addEventListener(type, (e) => e.preventDefault(), { passive: false });
 }
 
 function afterChange() {
@@ -626,6 +736,29 @@ $("theme").addEventListener("change", (e) => {
   applyTheme();
   // a shown tip's text is in the old theme's words
   clearHints();
+  useRenderer().then(() => board && draw());
+});
+
+// time of day for the 3d board: follow the clock, or a fixed hour
+const showHour = () => {
+  const h = Math.floor(settings.hour) % 24;
+  const m = Math.round((settings.hour % 1) * 60);
+  $("hour-label").textContent = settings.followClock ? "" : `${h}:${String(m).padStart(2, "0")}`;
+  $("hour").disabled = settings.followClock;
+};
+$("follow-clock").checked = settings.followClock;
+$("hour").value = settings.hour;
+showHour();
+$("follow-clock").addEventListener("change", (e) => {
+  settings.followClock = e.target.checked;
+  saveSettings();
+  showHour();
+  if (board) draw();
+});
+$("hour").addEventListener("input", (e) => {
+  settings.hour = Number(e.target.value);
+  saveSettings();
+  showHour();
   if (board) draw();
 });
 applyTheme();
@@ -679,6 +812,7 @@ async function main() {
     ? `#${dayNumber(puzzle.date)} · ${new Date(`${puzzle.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}`
     : "practice";
   $("subtitle").textContent = `${name} · ${TIERS[puzzle.tier].name}`;
+  await useRenderer();
   $("loading").hidden = true;
   showTime();
   if (started && !solved) startTimer();

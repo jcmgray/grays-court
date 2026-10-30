@@ -6,6 +6,10 @@
     <title>Grays Court</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>" />
     <link rel="stylesheet" href="style.css" />
+    <!-- only loaded when a 3d theme is picked -->
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
   </head>
   <body>
     <main class="app">
@@ -20,8 +24,9 @@
         </div>
       </header>
 
-      <div class="board-wrap">
+      <div id="board-wrap" class="board-wrap">
         <svg id="board" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="puzzle board"></svg>
+        <div id="board3d" class="board3d" hidden></div>
         <div id="loading" class="loading">surveying the land…</div>
       </div>
 
@@ -66,6 +71,11 @@
       </ul>
       <label class="setting"><input type="checkbox" id="castle-first" /> tap once for a <span data-word="star">castle</span> instead</label>
       <label class="setting">theme <select id="theme"></select></label>
+      <div id="time-setting" class="setting time-setting" hidden>
+        <label><input type="checkbox" id="follow-clock" /> light follows the clock</label>
+        <input type="range" id="hour" min="0" max="24" step="0.25" aria-label="time of day" />
+        <span id="hour-label"></span>
+      </div>
       <h2>practice</h2>
       <div class="practice">
         <button data-practice="easy">easy</button>

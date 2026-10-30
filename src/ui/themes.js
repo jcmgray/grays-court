@@ -3,7 +3,10 @@
 // these are all optional: land(biome) is the colour a region is drawn in,
 // regionBorder is the colour of the lines between regions, regionWidth their
 // width, regionWobble how far in board units they wave away from straight,
-// with regionWaves half waves along each cell edge, and road(d, biome) draws
+// with regionWaves half waves along each cell edge, river {colour, width}
+// draws one border from side to side as a river, crops(biome) are the
+// colours of a region's crops in 3d, roofs(biome) the colours of its castle
+// roofs in 3d, and road(d, biome) draws
 // the road along svg path d that joins up a region's stars once it has them
 // all, between the edges of their cells
 //
@@ -147,7 +150,7 @@ const CASTLE_WORDS = {
 };
 
 // the shire's lands: earthy colours only a little apart, and their names
-const SHIRE_LANDS = {
+export const SHIRE_LANDS = {
   forest: ["#8a9b63", "the mossy dell"],
   fields: ["#c2ad72", "the barley field"],
   desert: ["#b79f78", "the fallow ground"],
@@ -160,12 +163,12 @@ const SHIRE_LANDS = {
   tropics: ["#7f9a6a", "the green pasture"],
 };
 
-const TREES = ["#3e5a2c", "#4a6833", "#56763a"];
-const CROPS = ["#5a4527", "#5c7a33", "#c29a3e", "#6f5a30"];
+export const TREES = ["#3e5a2c", "#4a6833", "#56763a"];
+export const CROPS = ["#5a4527", "#5c7a33", "#c29a3e", "#6f5a30"];
 
 const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 
-const STONES = ["#a49e91", "#9a9a94", "#b2a58c", "#8f8a80"];
+export const STONES = ["#a49e91", "#9a9a94", "#b2a58c", "#8f8a80"];
 const ROOFS = ["#9a5a3c", "#5d6670", "#7a5a3a", "#8c4a3a"];
 
 // a hipped roof seen from above: a ridge along the long side, with hip lines
@@ -420,6 +423,8 @@ export const THEMES = {
     regionWidth: 1.3,
     regionWobble: 0.22,
     regionWaves: 6,
+    // and one river running across
+    river: { colour: "#4a7fb5", width: 2.2 },
     star: (x, y, biome, seed) => shireCastle(x, y, seed),
     blocked: shireFarm,
     // a dirt track
@@ -427,6 +432,36 @@ export const THEMES = {
       `<path d="${d}" pathLength="1" fill="none" stroke="#9b8257" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>`,
     words: CASTLE_WORDS,
   },
+};
+
+// the shire as a 3d diorama, drawn by render3d.js. it keeps the shire's flat
+// drawings for when three.js can't be loaded
+//
+// each land has its own crop, so the regions stand apart: its land colour,
+// its crop colours and its name
+const DIORAMA_LANDS = {
+  forest: ["#7d9a52", ["#4f7d32", "#5c8c3a", "#456f2c"], "the green pasture"],
+  fields: ["#c9b45e", ["#d8b24a", "#e2c35e", "#c9a23c"], "the wheat field"],
+  desert: ["#c4945a", ["#d08a3c", "#c07a35", "#b86e30"], "the pumpkin patch"],
+  lake: ["#8fa6b8", ["#7c9cd0", "#6f8fc4", "#8aa9d8"], "the flax field"],
+  mountains: ["#a09a88", ["#7d7466", "#8a8170", "#6e675a"], "the stony heath"],
+  snow: ["#c8cbb8", ["#e8e6d6", "#dcdccb", "#f0eee2"], "the chalk down"],
+  blossom: ["#c79aa6", ["#d58fae", "#c97c9c", "#e0a4bd"], "the pink clover"],
+  fungal: ["#9a8fae", ["#8c78c0", "#9a86cc", "#7f6ab2"], "the lavender field"],
+  volcanic: ["#b07a5c", ["#c2443a", "#b33a33", "#cf5a44"], "the poppy field"],
+  tropics: ["#7fa894", ["#4f9e88", "#5aae96", "#468f7a"], "the cabbage patch"],
+};
+
+THEMES.diorama = {
+  ...THEMES.shire,
+  label: "shire 3d",
+  renderer: "3d",
+  // a little grass in every land, as it catches the light
+  land: (biome) => mixColour(DIORAMA_LANDS[biome.name][0], "#7d9a52", 0.3),
+  crops: (biome) => DIORAMA_LANDS[biome.name][1],
+  // castle roofs a hint of the land's crops in a dim slate grey
+  roofs: (biome) => DIORAMA_LANDS[biome.name][1].map((c) => mixColour(c, "#6a6660", 0.55)),
+  regionName: (biome) => DIORAMA_LANDS[biome.name][2],
 };
 
 export const DEFAULT_THEME = "grays";

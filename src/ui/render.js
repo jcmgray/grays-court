@@ -21,7 +21,7 @@ const centre = (board, i) => [board.colOf(i) * S + S / 2, board.rowOf(i) * S + S
 // a shortest path of cells from a to b that stays inside their region,
 // stepping only up, down, left or right. of the shortest paths it takes one
 // with the fewest turns, so castles in a line get a straight road
-function regionPath(board, a, b) {
+export function regionPath(board, a, b) {
   const n = board.n;
   const g = board.regions[a];
   const steps = [-n, n, -1, 1];
@@ -58,6 +58,58 @@ function regionPath(board, a, b) {
   const path = [];
   for (let k = end; k !== undefined; k = from.get(k)) path.push(Math.floor(k / 4));
   return path.reverse();
+}
+
+// a river along the region borders, from one side of the board to another,
+// as a list of edges [x1, y1, x2, y2] in cell units from 0 to n, or [] if no
+// border reaches across. it prefers to run to the opposite side, and then the
+// longest way of the shortest routes between two such points. the same board
+// always gets the same river
+export function riverEdges(board) {
+  const n = board.n;
+  const key = (x, y) => y * (n + 1) + x;
+  const adj = new Map();
+  const link = (a, b) => {
+    for (const [p, q] of [[a, b], [b, a]]) {
+      if (!adj.has(p)) adj.set(p, []);
+      adj.get(p).push(q);
+    }
+  };
+  for (let i = 0; i < board.N; i++) {
+    const [r, c] = [board.rowOf(i), board.colOf(i)];
+    if (c < n - 1 && board.regions[i] !== board.regions[i + 1]) link(key(c + 1, r), key(c + 1, r + 1));
+    if (r < n - 1 && board.regions[i] !== board.regions[i + n]) link(key(c, r + 1), key(c + 1, r + 1));
+  }
+  // which side of the board a grid corner is on: top, right, bottom, left
+  const side = (k) => {
+    const [x, y] = [k % (n + 1), Math.floor(k / (n + 1))];
+    return y === 0 ? 0 : x === n ? 1 : y === n ? 2 : x === 0 ? 3 : -1;
+  };
+  const ends = [...adj.keys()].filter((k) => side(k) >= 0).sort((a, b) => a - b);
+
+  let best = null;
+  for (const start of ends) {
+    const from = new Map([[start, -1]]);
+    const queue = [start];
+    while (queue.length) {
+      const k = queue.shift();
+      for (const j of adj.get(k)) {
+        if (from.has(j)) continue;
+        from.set(j, k);
+        queue.push(j);
+      }
+    }
+    for (const end of ends) {
+      if (end <= start || !from.has(end) || side(end) === side(start)) continue;
+      const path = [];
+      for (let k = end; k !== -1; k = from.get(k)) path.push(k);
+      const score = (Math.abs(side(end) - side(start)) === 2 ? 1000 : 0) + path.length;
+      if (!best || score > best.score) best = { score, path };
+    }
+  }
+  if (!best) return [];
+  const at = (k) => [k % (n + 1), Math.floor(k / (n + 1))];
+  return best.path.slice(1).map((k, i) => [...at(best.path[i]), ...at(k)]);
 }
 
 // join edges [x1, y1, x2, y2] that meet end to end into as few lines as
@@ -254,7 +306,18 @@ export function createRenderer(svg) {
       }
       outline = `<path class="outline" d="M0 0 L${pts.join(" L")} Z"/>`;
     }
-    regionLayer.innerHTML = `<g class="region-borders">${chains(regionEdges).map(draw).join("")}</g>`;
+    // with a river theme, one border from side to side is drawn as a river
+    let borders = regionEdges;
+    let river = "";
+    if (theme.river) {
+      const edges = riverEdges(board).map((e) => e.map((v) => v * S));
+      const key = ([x1, y1, x2, y2]) => [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)].join();
+      const keys = new Set(edges.map(key));
+      borders = regionEdges.filter((e) => !keys.has(key(e)));
+      const { colour, width } = theme.river;
+      river = `<g fill="none" stroke="${colour}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${chains(edges).map(draw).join("")}</g>`;
+    }
+    regionLayer.innerHTML = `<g class="region-borders">${chains(borders).map(draw).join("")}</g>${river}`;
     edgeLayer.innerHTML = outline;
   }
 
