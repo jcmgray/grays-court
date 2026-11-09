@@ -50,6 +50,16 @@
   }
 }
 
+/* the neon city is always night, in light mode too */
+:root[data-look="city"] {
+  --bg: #0e0c16;
+  --card: #1a1726;
+  --ink: #ece8ff;
+  --muted: #8f89ad;
+  --accent: #c43ba0;
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -6,7 +6,7 @@
 // with regionWaves half waves along each cell edge, river {colour, width}
 // draws one border from side to side as a river, crops(biome) are the
 // colours of a region's crops in 3d, roofs(biome) the colours of its castle
-// roofs in 3d, and road(d, biome) draws
+// roofs in 3d, neon(biome) its neon in the 3d city, and road(d, biome) draws
 // the road along svg path d that joins up a region's stars once it has them
 // all, between the edges of their cells
 //
@@ -464,6 +464,48 @@ THEMES.diorama = {
   // castle roofs a hint of the land's crops in a dim slate grey
   roofs: (biome) => DIORAMA_LANDS[biome.name][1].map((c) => mixColour(c, "#6a6660", 0.55)),
   regionName: (biome) => DIORAMA_LANDS[biome.name][2],
+};
+
+// a neon city at night, drawn by render3d.js: towers for castles and low
+// sprawl for farms, each district lit in its own neon. world says which set
+// of 3d pieces to build, and night that it is never day there. it keeps the
+// shire's flat drawings for when three.js can't be loaded
+const CITY_NEON = {
+  forest: "#39ff6a",
+  fields: "#ffe03a",
+  desert: "#ff8a1f",
+  lake: "#2f8cff",
+  mountains: "#c8c8ff",
+  snow: "#f2f6ff",
+  blossom: "#ff4fb8",
+  fungal: "#a64dff",
+  volcanic: "#ff2a3a",
+  tropics: "#00f0d0",
+};
+
+THEMES.city = {
+  ...THEMES.shire,
+  label: "neon city 3d",
+  icon: "🌃",
+  renderer: "3d",
+  world: "city",
+  night: true,
+  // dark streets with a hint of the district's neon
+  land: (biome) => mixColour("#15151d", CITY_NEON[biome.name], 0.18),
+  neon: (biome) => CITY_NEON[biome.name],
+  regionName: (biome) => `the ${biome.colour} district`,
+  words: {
+    star: "tower",
+    stars: "towers",
+    place: "build",
+    placed: "built",
+    blockedOne: "block",
+    blocked: "sprawl",
+    region: "district",
+    done: "the city never sleeps",
+    auto: "auto-sprawl",
+    autoBadge: "🏙️ auto-sprawl",
+  },
 };
 
 export const DEFAULT_THEME = "grays";

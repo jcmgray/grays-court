@@ -115,7 +115,7 @@ async function useRenderer() {
   // toggleAttribute, as svg elements don't hide through the hidden property
   svg.toggleAttribute("hidden", renderer !== flat);
   $("board3d").hidden = renderer !== deep;
-  $("time-setting").hidden = theme().renderer !== "3d";
+  $("time-setting").hidden = theme().renderer !== "3d" || theme().night;
 }
 
 function display() {

@@ -5,7 +5,7 @@
 
 import * as THREE from "three";
 import { CASTLE, ROAD } from "../core/rules.js";
-import { hashString, makeRng } from "../core/rng.js";
+import { hashString, makeRng, shuffle } from "../core/rng.js";
 import { mixColour } from "./colour.js";
 import { regionPath, riverEdges } from "./render.js";
 import { STONES, TREES } from "./themes.js";
@@ -29,6 +29,7 @@ const HEDGE = ["#3f5a2c", "#4a6632", "#36502a"];
 const WATER = ["#5585b8", "#2e5d94"];
 const BANK = ["#7a7450", "#4f4832"];
 const ROAD_COLOUR = "#9b8257";
+const COBBLES = "#d8cfba";
 const FLAGS = ["#b3322d", "#2d5fb3", "#e0b13a", "#2f7d4a"];
 const WALLS = ["#e6dcc6", "#d8c9a6", "#c9b48e", "#b8ad98"];
 const THATCH = ["#b0904f", "#9a7a42", "#8f6d3a", "#9a5a3c"];
@@ -46,6 +47,12 @@ const DAY = [
   [21, "#a6b8f0", 1, "#4a5a8f", "#1a1f2c", 0.8, 1],
   [24, "#a6b8f0", 1, "#4a5a8f", "#1a1f2c", 0.8, 1],
 ];
+
+// the neon city: its slab, concrete in a few shades, and its light, always
+// night
+const ASPHALT = "#15151d";
+const CONCRETE = ["#23252f", "#2b2d38", "#1d1f28", "#30323e"];
+const CITY_NIGHT = { sun: "#8f9cff", sunStrength: 0.8, sky: "#5a4890", ground: "#0c0a14", fill: 0.8, night: 1, hour: 0 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -178,6 +185,90 @@ function tileTextures(size = 64, rows = 4, cols = 4) {
   });
 }
 
+// windows for the city as a glow map, black where unlit: a grid of them with
+// some lit, in warm or cool white
+function windowTexture(seed, lit = 0.4, size = 256, cols = 16, rows = 20) {
+  const rng = makeRng(seed);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, size, size);
+  const [cw, rh] = [size / cols, size / rows];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (rng() > lit) continue;
+      ctx.fillStyle = pick(rng, ["#ffd9a0", "#bfe4ff", "#fff4e0", "#ffe9c4"]);
+      ctx.fillRect(c * cw + cw * 0.2, r * rh + rh * 0.2, cw * 0.6, rh * 0.55);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// a glowing sign's face, white to be tinted by its colour: a dimly lit panel
+// with a bright border and blocky marks like lettering, in a column for a
+// tall sign or a row for a wide one
+function signTexture(seed, tall) {
+  const rng = makeRng(seed);
+  const [w, h] = tall ? [64, 256] : [256, 64];
+  const canvas = document.createElement("canvas");
+  [canvas.width, canvas.height] = [w, h];
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, w - 4, h - 4);
+  ctx.fillStyle = "#fff";
+  // each mark a few strokes in a square
+  for (let k = 0; k < 6; k++) {
+    const [x0, y0] = tall ? [14, 14 + k * 39] : [14 + k * 39, 14];
+    for (let s = 0, n = 2 + Math.floor(rng() * 3); s < n; s++) {
+      const across = rng() < 0.5;
+      const at = 4 + rng() * 28;
+      const [from, len] = [rng() * 12, 12 + rng() * 20];
+      if (across) ctx.fillRect(x0 + from, y0 + at, len, 5);
+      else ctx.fillRect(x0 + at, y0 + from, 5, len);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// cobbles, white to be tinted by their colour: rounded stones of slightly
+// varied shades, one to a square of a grid, on dark gaps. no stone crosses
+// an edge, so the texture tiles without seams
+function cobbleTexture(seed, size = 128, count = 8) {
+  const rng = makeRng(seed);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgb(120, 120, 120)";
+  ctx.fillRect(0, 0, size, size);
+  const step = size / count;
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      const v = Math.round(205 + rng() * 50);
+      ctx.fillStyle = `rgb(${v}, ${v}, ${v})`;
+      const [w, h] = [step * (0.72 + rng() * 0.18), step * (0.72 + rng() * 0.18)];
+      ctx.beginPath();
+      ctx.roundRect(c * step + (step - w) / 2, r * step + (step - h) / 2, w, h, step * 0.3);
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 const dark = (rng, a) => `rgba(40, 50, 20, ${(a * (0.6 + 0.8 * rng())).toFixed(3)})`;
 const light = (rng, a) => `rgba(255, 255, 230, ${(a * (0.6 + 0.8 * rng())).toFixed(3)})`;
 
@@ -195,6 +286,9 @@ function drawFurrows(ctx, rng) {
   }
 }
 const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
+
+// a lighter or darker shade of a colour, for a district's signs
+const shade = (rng, colour) => (rng() < 0.5 ? mixColour(colour, "#ffffff", rng() * 0.6) : mixColour(colour, "#000000", rng() * 0.45));
 
 // overshoots a little then settles, for things growing in
 const easeOutBack = (t) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
@@ -268,11 +362,18 @@ export function createRenderer3d(container) {
   roadLook.userData.texturePerUnit = 4;
   const roadPart = new THREE.MeshStandardMaterial({ color: ROAD_COLOUR });
   roadPart.userData.look = roadLook;
-  // castle roofs are tiled, in their own colours. tileSize is how wide and
-  // tall one repeat of the texture is, four tiles across and four rows up
+  // castle roofs are tiled, in their own colours, with a repeat of the
+  // texture, four tiles across and four rows up, 0.2 wide and 0.14 tall. a
+  // roof's uvs go round its sides, and up its height or along its length
   const [tileShape, tileShade] = tileTextures();
   const roofLook = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, normalMap: tileShape, map: tileShade });
-  roofLook.userData.tileSize = [0.2, 0.14];
+  roofLook.userData.stretch = (s) => [(2 * Math.PI * s.x) / 0.2, Math.max(s.y, s.z) / 0.14];
+  // castle courtyards are light cobbles, a repeat of the texture 0.12
+  // across. the round one is a cylinder half a unit across, so its scale is
+  // its width like a box's
+  const cobbleLook = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, map: cobbleTexture(51) });
+  cobbleLook.userData.stretch = (s) => [s.x / 0.12, s.z / 0.12];
+  const disc = new THREE.CylinderGeometry(0.5, 0.5, 1, 28);
   const roofParts = new Map();
   const roofPart = (colour) => {
     if (!roofParts.has(colour)) {
@@ -281,6 +382,47 @@ export function createRenderer3d(container) {
       roofParts.set(colour, part);
     }
     return roofParts.get(colour);
+  };
+
+  // the city's looks, each merged into by parts made with its own colour:
+  // concrete with lit windows laid out by the size of each wall, the light
+  // in them tinted by the district's neon, plain neon that glows whatever
+  // the light, and glowing signs tall and wide
+  const windows = windowTexture(21);
+  const towerLooks = new Map();
+  const towerLook = (neon) => {
+    if (!towerLooks.has(neon)) {
+      const look = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.6,
+        emissive: mixColour("#ffffff", neon, 0.09),
+        emissiveMap: windows,
+      });
+      look.userData.stretch = (s) => [Math.max(s.x, s.z) / 0.8, s.y / 0.8];
+      towerLooks.set(neon, look);
+    }
+    return towerLooks.get(neon);
+  };
+  // the city's streets glow a little in their district's neon
+  const groundLooks = new Map();
+  const street = (colour, neon) => {
+    const key = `${colour}:${neon}`;
+    if (!groundLooks.has(key)) {
+      groundLooks.set(key, new THREE.MeshStandardMaterial({ color: colour, emissive: neon, emissiveIntensity: 0.025, roughness: 0.9 }));
+    }
+    return groundLooks.get(key);
+  };
+  const neonLook = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const signLooks = [true, false].map((tall) => new THREE.MeshBasicMaterial({ vertexColors: true, map: signTexture(tall ? 31 : 32, tall) }));
+  const parts = new Map();
+  const part = (look, colour) => {
+    const key = `${look.uuid}:${colour}`;
+    if (!parts.has(key)) {
+      const made = new THREE.MeshStandardMaterial({ color: colour });
+      made.userData.look = look;
+      parts.set(key, made);
+    }
+    return parts.get(key);
   };
 
   // a field's soil, its furrows turned to run along its rows
@@ -334,7 +476,8 @@ export function createRenderer3d(container) {
   function drawLand(b, theme, biomes) {
     landGroup.clear();
     const n = b.n;
-    landGroup.add(solid(box, SOIL, [n + 0.4, 0.7, n + 0.4], [0, -0.35, 0]));
+    const city = theme.world === "city";
+    landGroup.add(solid(box, city ? ASPHALT : SOIL, [n + 0.4, 0.7, n + 0.4], [0, -0.35, 0]));
     // a soft shadow under the slab, the same at every hour, so it looks like
     // it floats just above the page
     const blob = document.createElement("canvas");
@@ -351,17 +494,32 @@ export function createRenderer3d(container) {
     );
     shadow.position.set(0.3, -1.2, 0.5);
     landGroup.add(shadow);
-    // a plain tile per cell in its region's colour
+    // a plain tile per cell in its region's colour, glowing faintly in the
+    // city
     for (let i = 0; i < b.N; i++) {
       const [x, z] = cellCentre(b, i);
-      const tile = solid(box, theme.land(biomes[b.regions[i]]), [0.97, TOP, 0.97], [x, TOP / 2, z]);
+      const biome = biomes[b.regions[i]];
+      const tile = solid(box, city ? street(theme.land(biome), theme.neon(biome)) : theme.land(biome), [0.97, TOP, 0.97], [x, TOP / 2, z]);
       tile.castShadow = false;
       landGroup.add(tile);
+    }
+    // in the city the gaps between tiles are too dark to see, so the grid is
+    // drawn in faint lines over them
+    if (city) {
+      const lines = [];
+      for (let k = 1; k < n; k++) {
+        const at = k - n / 2;
+        lines.push(at, TOP + 0.002, -n / 2, at, TOP + 0.002, n / 2, -n / 2, TOP + 0.002, at, n / 2, TOP + 0.002, at);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
+      landGroup.add(new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: "#4e4a68" })));
     }
 
     // a river along one border from side to side, a flat ribbon of water
     // through its corners with each bend rounded off
-    const river = riverEdges(b);
+    // no river in the city
+    const river = city ? [] : riverEdges(b);
     const onRiver = new Set();
     riverside = new Map();
     hedgeside = new Map();
@@ -448,27 +606,70 @@ export function createRenderer3d(container) {
       strip([[-0.1, 0.01, wet], [-0.125, 0.03, top], [-0.155, 0, top]], mud);
     }
 
-    // hedges: a row of bumps along every other edge between regions
-    const rng = makeRng(hashString(`${b.regions}:hedges`));
-    const bumps = [];
+    // every other edge between regions, as [x, z, along z or x, the
+    // regions either side]
+    const edges = [];
     for (let i = 0; i < b.N; i++) {
       const r = b.rowOf(i);
       const c = b.colOf(i);
       const [x, z] = cellCentre(b, i);
       if (c < n - 1 && b.regions[i] !== b.regions[i + 1] && !onRiver.has(`${c + 1},${r},v`)) {
-        for (let k = 0; k <= 6; k++) bumps.push([x + 0.5, z - 0.5 + k / 6]);
+        edges.push([x + 0.5, z, true, b.regions[i], b.regions[i + 1]]);
         beside(hedgeside, i, [1, 0]);
         beside(hedgeside, i + 1, [-1, 0]);
       }
       if (r < n - 1 && b.regions[i] !== b.regions[i + n] && !onRiver.has(`${c},${r + 1},h`)) {
-        for (let k = 0; k <= 6; k++) bumps.push([x - 0.5 + k / 6, z + 0.5]);
+        edges.push([x, z + 0.5, false, b.regions[i], b.regions[i + n]]);
         beside(hedgeside, i, [0, 1]);
         beside(hedgeside, i + n, [0, -1]);
       }
     }
-    const hedge = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), material("#ffffff"), bumps.length);
+    const rng = makeRng(hashString(`${b.regions}:hedges`));
     const m = new THREE.Matrix4();
     const colour = new THREE.Color();
+
+    // in the city, a highway along each: dark tarmac scattered with lots of
+    // tiny lights of all colours, edged each side by a kerb in the neon of
+    // the district on that side, so every district is outlined in its own
+    // colour
+    if (city) {
+      // a box along the edge, `off` to one side of it, `along` it and `len`
+      // long, `wide` across, h tall at height y
+      const place = ([x, z, alongZ], off, along, len, wide, h, y) => {
+        const [sx, sz] = alongZ ? [wide, len] : [len, wide];
+        const [px, pz] = alongZ ? [x + off, z + along] : [x + along, z + off];
+        return m.makeScale(sx, h, sz).setPosition(px, y, pz);
+      };
+      const road = new THREE.InstancedMesh(box, material("#1b1b22"), edges.length);
+      const kerbs = new THREE.InstancedMesh(box, new THREE.MeshBasicMaterial(), 2 * edges.length);
+      const lights = [];
+      edges.forEach((edge, k) => {
+        const [, , , g, h] = edge;
+        road.setMatrixAt(k, place(edge, 0, 0, 1, 0.12, 0.008, TOP + 0.004));
+        // g is on the -x or -z side, h on the other
+        [g, h].forEach((region, s) => {
+          kerbs.setMatrixAt(2 * k + s, place(edge, (s ? 1 : -1) * 0.058, 0, 1, 0.01, 0.012, TOP + 0.006));
+          kerbs.setColorAt(2 * k + s, colour.set(theme.neon(biomes[region])));
+        });
+        for (let c = 0, n = 14 + Math.floor(rng() * 10); c < n; c++) {
+          lights.push([edge, (rng() - 0.5) * 0.09, (rng() - 0.5) * 0.98, rng(), 0.6 + rng() * 0.4]);
+        }
+      });
+      const dots = new THREE.InstancedMesh(box, new THREE.MeshBasicMaterial(), lights.length);
+      lights.forEach(([edge, across, along, hue, light], k) => {
+        dots.setMatrixAt(k, place(edge, across, along, 0.01, 0.01, 0.004, TOP + 0.01));
+        dots.setColorAt(k, colour.setHSL(hue, 0.7, 0.55 + light * 0.2));
+      });
+      road.receiveShadow = true;
+      landGroup.add(road, kerbs, dots);
+      return;
+    }
+
+    // hedges: a row of bumps along each
+    const bumps = edges.flatMap(([x, z, alongZ]) =>
+      Array.from({ length: 7 }, (_, k) => (alongZ ? [x, z - 0.5 + k / 6] : [x - 0.5 + k / 6, z])),
+    );
+    const hedge = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), material("#ffffff"), bumps.length);
     bumps.forEach(([x, z], k) => {
       const s = 0.09 + rng() * 0.04;
       m.makeScale(s, s * (0.9 + rng() * 0.4), s);
@@ -617,8 +818,11 @@ export function createRenderer3d(container) {
     if (sides.length >= 3) layout = 2;
     // how far the outer wall reaches towards the river
     let reach;
+    // light cobbles inside the outer wall, so castles show from above
+    const yard = (shape, sx, sz) => g.add(solid(shape, part(cobbleLook, COBBLES), [sx, 0.008, sz], [0, 0.004, 0]));
     if (layout === 0) {
       const h = 0.24 + rng() * 0.06;
+      yard(box, 0.84, 0.84);
       bailey(g, rng, stone, roof, 0.42, 0.42, h, 0.09, river);
       reach = 0.42;
       keep(g, rng, stone, roof, (rng() - 0.5) * 0.08, (rng() - 0.5) * 0.08, 0.17 + rng() * 0.04, 0.55 + rng() * 0.2);
@@ -626,6 +830,7 @@ export function createRenderer3d(container) {
       const wide = rng() < 0.5;
       const [hx, hz] = wide ? [0.44, 0.3] : [0.3, 0.44];
       const h = 0.22 + rng() * 0.05;
+      yard(box, 2 * hx, 2 * hz);
       bailey(g, rng, stone, roof, hx, hz, h, 0.08, river);
       reach = river && river[0] ? hx : hz;
       const end = rng() < 0.5 ? -1 : 1;
@@ -636,6 +841,7 @@ export function createRenderer3d(container) {
     } else if (layout === 2) {
       const R = 0.4;
       const h = 0.24 + rng() * 0.05;
+      yard(disc, 2 * R, 2 * R);
       const n = 14;
       for (let k = 0; k < n; k++) {
         const [a0, a1] = [(2 * Math.PI * k) / n, (2 * Math.PI * (k + 1)) / n];
@@ -657,6 +863,7 @@ export function createRenderer3d(container) {
       if (river) gatehouse(g, rng, stone, roof, river[0] * R, river[1] * R, Math.atan2(river[0], river[1]), h);
       reach = R;
     } else {
+      yard(box, 0.88, 0.88);
       bailey(g, rng, stone, roof, 0.44, 0.44, 0.18, 0.07, river);
       bailey(g, rng, stone, roof, 0.27, 0.27, 0.32, 0.075);
       keep(g, rng, stone, roof, 0, 0, 0.12, 0.62 + rng() * 0.15);
@@ -764,15 +971,13 @@ export function createRenderer3d(container) {
       if (!parts.has(key)) parts.set(key, { look, shadow: m.castShadow, geometries: [] });
       const geometry = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
       geometry.applyMatrix4(m.matrixWorld);
-      // roof uvs stretched by each roof's size, so its tiles come out the same
-      // size on every roof. round its sides, and up its height or length
-      const tile = look.userData.tileSize;
-      if (tile) {
-        const { x: sx, y: sy, z: sz } = m.scale;
+      // uvs stretched by the size of each part, so a look's texture comes out
+      // the same size on every part
+      const stretch = look.userData.stretch;
+      if (stretch) {
+        const [fu, fv] = stretch(m.scale);
         const uv = geometry.attributes.uv;
-        for (let k = 0; k < uv.count; k++) {
-          uv.setXY(k, (uv.getX(k) * 2 * Math.PI * sx) / tile[0], (uv.getY(k) * Math.max(sy, sz)) / tile[1]);
-        }
+        for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * fu, uv.getY(k) * fv);
       }
       const per = look.userData.texturePerUnit;
       if (per) {
@@ -909,6 +1114,135 @@ export function createRenderer3d(container) {
     return bake(g);
   }
 
+  // a glowing sign on a wall facing out towards [nx, nz], from `out` beyond
+  // the middle, `along` across the wall and y up it, w across and h tall. a
+  // blade sign sticks straight out from the wall, Tokyo style, and is read
+  // from the side. a billboard lies flat against the wall
+  function sign(g, colour, [nx, nz], out, along, y, w, h, blade) {
+    const [tx, tz] = [-nz, nx];
+    const off = out + (blade ? w / 2 : 0.006);
+    // the lettering shows on a box's two big faces, so it's thin across them
+    const thinX = blade ? tx !== 0 : nx !== 0;
+    const look = signLooks[h > w ? 0 : 1];
+    g.add(solid(box, part(look, colour), thinX ? [0.01, h, w] : [w, h, 0.01], [nx * off + tx * along, y, nz * off + tz * along]));
+  }
+
+  // a block of concrete with lit windows, w by d and h tall, centred at x, z,
+  // with a plain cap so the windows don't run over its roof, all tinted by
+  // the district's neon
+  function block(g, rng, neon, w, h, d, x, z) {
+    const concrete = () => mixColour(pick(rng, CONCRETE), neon, 0.035);
+    g.add(solid(box, part(towerLook(neon), concrete()), [w, h, d], [x, h / 2, z]));
+    g.add(solid(box, concrete(), [w + 0.01, 0.015, d + 0.01], [x, h + 0.0075, z]));
+  }
+
+  const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  // a district's towers on a castle's cell: a cluster of thin towers rising
+  // out of low blocks on lit streets, the tallest in the middle with a mast and a red light on
+  // top, some edged in the district's neon, and all hung with signs in shades
+  // of it
+  function skyscrapers(rng, neon, height) {
+    const g = new THREE.Group();
+    // softly lit streets, so tower cells stand out from above, between low
+    // blocks that the towers rise out of
+    g.add(solid(box, part(neonLook, mixColour("#8f8da4", neon, 0.2)), [0.92, 0.004, 0.92], [0, 0.002, 0]));
+    const lots = 2 + Math.floor(rng() * 2);
+    const lot = 0.92 / lots;
+    for (let a = 0; a < lots; a++) {
+      for (let c = 0; c < lots; c++) {
+        const [x, z] = [-0.46 + lot * (a + 0.5), -0.46 + lot * (c + 0.5)];
+        block(g, rng, neon, lot - 0.08, 0.05 + rng() * 0.06, lot - 0.08, x, z);
+      }
+    }
+    // the middle, then some of the spots round it on a 3 by 3 grid
+    const around = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+    const spots = [[0, 0], ...shuffle(rng, around).slice(0, 4 + Math.floor(rng() * 4))];
+    spots.forEach(([sx, sz], k) => {
+      const t = new THREE.Group();
+      const w = 0.1 + rng() * 0.06;
+      const h = k === 0 ? height : height * (0.35 + rng() * 0.55);
+      block(t, rng, neon, w, h, w, 0, 0);
+      if (k === 0 || rng() < 0.4) {
+        for (const [ex, ez] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+          t.add(solid(box, part(neonLook, neon), [0.008, h, 0.008], [(ex * w) / 2, h / 2, (ez * w) / 2]));
+        }
+      }
+      // bright lights round the edge of its roof, so it shows from above
+      for (const [ex, ez] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        if (ex && ez ? true : rng() < 0.5) {
+          const at = w / 2 - 0.012;
+          t.add(solid(box, part(neonLook, mixColour(neon, "#ffffff", 0.6)), [0.016, 0.012, 0.016], [ex * at, h + 0.021, ez * at]));
+        }
+      }
+      if (k === 0) {
+        t.add(solid(cylinder, "#2a2c36", [0.006, 0.22, 0.006], [0, h + 0.11, 0]));
+        t.add(solid(box, part(neonLook, "#ff3030"), [0.02, 0.02, 0.02], [0, h + 0.23, 0]));
+      }
+      for (const side of SIDES) {
+        if (rng() < 0.45) {
+          const sh = 0.12 + rng() * 0.16;
+          sign(t, shade(rng, neon), side, w / 2, 0, sh / 2 + 0.04 + rng() * Math.max(0, h - sh - 0.1), 0.05, sh, true);
+        }
+      }
+      t.position.set(sx * 0.31 + (rng() - 0.5) * 0.04, 0, sz * 0.31 + (rng() - 0.5) * 0.04);
+      g.add(t);
+    });
+    return g;
+  }
+
+  // a district's sprawl on a farm's cell: low blocks packed in a grid of
+  // narrow streets, with lots of small signs on their walls and roofs,
+  // in shades of the district's neon
+  function sprawl(rng, neon) {
+    const g = new THREE.Group();
+    const signColour = () => shade(rng, neon);
+    const [nx, nz] = [2 + Math.floor(rng() * 2), 2 + Math.floor(rng() * 2)];
+    const [lw, ld] = [0.92 / nx, 0.92 / nz];
+    for (let a = 0; a < nx; a++) {
+      for (let c = 0; c < nz; c++) {
+        const [x, z] = [-0.46 + lw * (a + 0.5), -0.46 + ld * (c + 0.5)];
+        const [w, d] = [lw - 0.05, ld - 0.05];
+        const h = 0.04 + rng() ** 2 * 0.18;
+        block(g, rng, neon, w, h, d, x, z);
+        const lot = new THREE.Group();
+        if (rng() < 0.35) lot.add(solid(box, "#3a3c48", [w * 0.3, 0.025, d * 0.3], [(rng() - 0.5) * w * 0.4, h + 0.02, (rng() - 0.5) * d * 0.4]));
+        // a few small signs: billboards standing on the roof, and blade
+        // signs and billboards on the walls
+        for (let n = 1 + Math.floor(rng() * 3); n > 0; n--) {
+          const side = pick(rng, SIDES);
+          const [across, half] = side[0] ? [d, w / 2] : [w, d / 2];
+          const along = (rng() - 0.5) * across * 0.6;
+          const kind = rng();
+          if (kind < 0.3) sign(lot, signColour(), side, (rng() - 0.5) * half, along, h + 0.03, across * 0.35, 0.04, false);
+          else if (kind < 0.65) sign(lot, signColour(), side, half, along, h * (0.4 + rng() * 0.4), 0.03, 0.04 + rng() * 0.04, true);
+          else sign(lot, signColour(), side, half, along, h * (0.4 + rng() * 0.4), across * 0.3, 0.03, false);
+        }
+        lot.position.set(x, 0, z);
+        g.add(lot);
+      }
+    }
+    return g;
+  }
+
+  // how tall the tallest tower, in the middle of a castle cell, is
+  const towerHeight = (b, i) => 1.15 + makeRng(hashString(`${b.regions}:${i}:tower`))() * 0.75;
+
+  // a lit walkway high up between a district's two towers at cells i and j
+  function skybridge(b, i, j, neon) {
+    const g = new THREE.Group();
+    const [[x0, z0], [x1, z1]] = [cellCentre(b, i), cellCentre(b, j)];
+    const len = Math.hypot(x1 - x0, z1 - z0) - 0.12;
+    const y = 0.6 * Math.min(towerHeight(b, i), towerHeight(b, j));
+    const span = new THREE.Group();
+    span.add(solid(box, CONCRETE[3], [len, 0.045, 0.07], [0, y, 0]));
+    for (const s of [-1, 1]) span.add(solid(box, part(neonLook, neon), [len, 0.008, 0.008], [0, y - 0.02, s * 0.036]));
+    span.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+    span.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+    g.add(span);
+    return bake(g);
+  }
+
   // keep one object per key in a group, made by make(key) when it first
   // appears, growing in if animating, and drop the rest. the part of a key
   // before any ":" says what and where, so a piece only rebuilt because its
@@ -934,10 +1268,10 @@ export function createRenderer3d(container) {
     }
   }
 
-  function setLight() {
+  function setLight(theme) {
     const now = new Date();
     const h = hour ?? now.getHours() + now.getMinutes() / 60;
-    const light = lightAt(h);
+    const light = theme.night ? CITY_NIGHT : lightAt(h);
     // the sun rises in the east and sets in the west, the moon hangs high in
     // the south east all night. neither goes below about 25 degrees, so
     // light never just grazes the board and the puzzle stays easy to read
@@ -988,8 +1322,8 @@ export function createRenderer3d(container) {
   new ResizeObserver(resize).observe(container);
   // follow the clock, checking the light every minute
   setInterval(() => {
-    if (hour === null && board) {
-      setLight();
+    if (hour === null && board && latest) {
+      setLight(latest.theme);
       requestRender();
     }
   }, 60000);
@@ -1014,7 +1348,7 @@ export function createRenderer3d(container) {
       roads = new Map();
       animate = false;
     }
-    setLight();
+    setLight(theme);
 
     // castles and farms, keyed by cell and what's there. a farm's key also
     // lists the castles beside it, so it is built again with houses when one
@@ -1031,8 +1365,12 @@ export function createRenderer3d(container) {
       const [cell, near] = key.slice(1).split(":");
       const i = Number(cell);
       const rng = makeRng(hashString(`${b.regions}:${i}`));
+      const city = theme.world === "city";
       let obj;
-      if (key[0] === "c") {
+      if (city) {
+        const neon = theme.neon(biomes[b.regions[i]]);
+        obj = key[0] === "c" ? skyscrapers(rng, neon, towerHeight(b, i)) : sprawl(rng, neon);
+      } else if (key[0] === "c") {
         obj = castle(rng, theme.roofs(biomes[b.regions[i]]), riverside.get(i));
       } else {
         const biome = biomes[b.regions[i]];
@@ -1057,7 +1395,9 @@ export function createRenderer3d(container) {
       for (let s = 1; s < stars.length; s++) paths.add(regionPath(b, stars[s - 1], stars[s]).join(","));
     }
     sync(roadGroup, roads, paths, (key) => {
-      const obj = road(b, key.split(",").map(Number));
+      const cells = key.split(",").map(Number);
+      const obj =
+        theme.world === "city" ? skybridge(b, cells[0], cells.at(-1), theme.neon(biomes[b.regions[cells[0]]])) : road(b, cells);
       obj.position.y = TOP;
       return obj;
     });
