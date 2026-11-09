@@ -109,8 +109,7 @@ function buildings(rng) {
 }
 
 // a wall round a castle, as a band between two squares to fill with the even
-// odd rule. it sits just outside the cell, with the inner edge clear of the
-// region border so that stays visible, and the outer edge wonky
+// odd rule, with the outer edge wonky
 function wall(rng, x, y, inner, outer, wobble) {
   const square = (half, lo, hi) =>
     [
@@ -132,7 +131,8 @@ function wall(rng, x, y, inner, outer, wobble) {
 function castleWall(x, y, biome, seed, opacity) {
   const rng = makeRng(seed ^ 0x51ed270b);
   const fill = tint(biome.color, 0.86 + 0.14 * 0.6, 1);
-  return `<path d="${wall(rng, x, y, 5.45, 6.2, 0.25)}" fill="${fill}" fill-opacity="${opacity}" fill-rule="evenodd"/>`;
+  // just inside the cell, so it stays clear of the region borders
+  return `<path d="${wall(rng, x, y, 3.95, 4.6, 0.2)}" fill="${fill}" fill-opacity="${opacity}" fill-rule="evenodd"/>`;
 }
 
 // the words for themes of castles and farms
@@ -337,7 +337,9 @@ export const THEMES = {
       // bright white with a faint touch of the land's hue
       const white = (t) => tint(biome.color, 0.86 + 0.14 * t, 1);
       const { main, others } = buildings(rng);
-      const draw = ([a, b, c, d], fill) => wobbly(rng, [x + a, y + b, x + c, y + d], 0.35, `fill="${fill}"`);
+      // a little smaller, to fit inside the wall
+      const k = 0.8;
+      const draw = ([a, b, c, d], fill) => wobbly(rng, [x + k * a, y + k * b, x + k * c, y + k * d], 0.35, `fill="${fill}"`);
       const houses = others.map((box) => draw(box, white(0.7))).join("") + draw(main, white(0.92));
       return castleWall(x, y, biome, seed, 1) + houses;
     },
@@ -356,8 +358,8 @@ export const THEMES = {
       const fill = tint(biome.color, 0.86 + 0.14 * 0.7, 1);
       const turrets = spots
         .map(([sx, sy]) => {
-          const r = 0.6 + rng() * 0.3;
-          return `<circle cx="${(x + sx * 5.85).toFixed(2)}" cy="${(y + sy * 5.85).toFixed(2)}" r="${r.toFixed(2)}" fill="${fill}"/>`;
+          const r = 0.5 + rng() * 0.2;
+          return `<circle cx="${(x + sx * 4.3).toFixed(2)}" cy="${(y + sy * 4.3).toFixed(2)}" r="${r.toFixed(2)}" fill="${fill}"/>`;
         })
         .join("");
       return castleWall(x, y, biome, seed, 0.5) + turrets;
