@@ -5,8 +5,8 @@
 // width, regionWobble how far in board units they wave away from straight,
 // with regionWaves half waves along each cell edge, river {colour, width}
 // draws one border from side to side as a river, crops(biome) are the
-// colours of a region's crops in 3d, roofs(biome) the colours of its castle
-// roofs in 3d, neon(biome) its neon in the 3d city, and road(d, biome) draws
+// colours of a region's crops in 3d, roofs(biome) and flags(biome) the colours
+// of its castle roofs and flags in 3d, neon(biome) its neon in the 3d city, and road(d, biome) draws
 // the road along svg path d that joins up a region's stars once it has them
 // all, between the edges of their cells
 //
@@ -461,8 +461,9 @@ THEMES.diorama = {
   // a little grass in every land, as it catches the light
   land: (biome) => mixColour(DIORAMA_LANDS[biome.name][0], "#7d9a52", 0.3),
   crops: (biome) => DIORAMA_LANDS[biome.name][1],
-  // castle roofs a hint of the land's crops in a dim slate grey
-  roofs: (biome) => DIORAMA_LANDS[biome.name][1].map((c) => mixColour(c, "#6a6660", 0.55)),
+  // castle roofs in the land's crop colours, and flags a little brighter
+  roofs: (biome) => DIORAMA_LANDS[biome.name][1],
+  flags: (biome) => DIORAMA_LANDS[biome.name][1].map((c) => mixColour(c, "#ffffff", 0.2)),
   regionName: (biome) => DIORAMA_LANDS[biome.name][2],
 };
 

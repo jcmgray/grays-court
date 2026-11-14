@@ -30,7 +30,6 @@ const WATER = ["#5585b8", "#2e5d94"];
 const BANK = ["#7a7450", "#4f4832"];
 const ROAD_COLOUR = "#9b8257";
 const COBBLES = "#d8cfba";
-const FLAGS = ["#b3322d", "#2d5fb3", "#e0b13a", "#2f7d4a"];
 const WALLS = ["#e6dcc6", "#d8c9a6", "#c9b48e", "#b8ad98"];
 const THATCH = ["#b0904f", "#9a7a42", "#8f6d3a", "#9a5a3c"];
 
@@ -110,8 +109,9 @@ function rippleTexture(seed, size = 128) {
   return tex;
 }
 
-// a rough dirt surface as a normal map: lots of little bumps and dips, each
-// wrapping round the edges so the texture tiles without seams
+// a rough dirt surface: lots of little bumps and dips, each wrapping round
+// the edges so the textures tile without seams. gives a normal map for
+// their shape, and a shade, lighter on the bumps and darker in the dips
 function dirtTexture(seed, size = 64) {
   const rng = makeRng(seed);
   const height = new Float32Array(size * size);
@@ -127,22 +127,29 @@ function dirtTexture(seed, size = 64) {
       }
     }
   }
-  const data = new Uint8Array(size * size * 4);
+  const [lo, hi] = [Math.min(...height), Math.max(...height)];
+  const normal = new Uint8Array(size * size * 4);
+  const shade = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const at = (i, j) => height[wrap(j) * size + wrap(i)];
-      const [nx, ny] = [-(at(x + 1, y) - at(x - 1, y)) * 0.6, -(at(x, y + 1) - at(x, y - 1)) * 0.6];
+      const [nx, ny] = [-(at(x + 1, y) - at(x - 1, y)) * 0.9, -(at(x, y + 1) - at(x, y - 1)) * 0.9];
       const len = Math.hypot(nx, ny, 1);
-      data.set([(nx / len + 1) * 127.5, (ny / len + 1) * 127.5, (1 / len + 1) * 127.5, 255], 4 * (y * size + x));
+      normal.set([(nx / len + 1) * 127.5, (ny / len + 1) * 127.5, (1 / len + 1) * 127.5, 255], 4 * (y * size + x));
+      const v = 255 * (0.78 + (0.22 * (at(x, y) - lo)) / (hi - lo));
+      shade.set([v, v, v, 255], 4 * (y * size + x));
     }
   }
-  const tex = new THREE.DataTexture(data, size, size);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.generateMipmaps = true;
-  tex.needsUpdate = true;
-  return tex;
+  return [normal, shade].map((data, k) => {
+    const tex = new THREE.DataTexture(data, size, size);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    if (k === 1) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  });
 }
 
 // roof tiles: rows of tiles each lapping over the row below, with the joins
@@ -293,6 +300,67 @@ const shade = (rng, colour) => (rng() < 0.5 ? mixColour(colour, "#ffffff", rng()
 // overshoots a little then settles, for things growing in
 const easeOutBack = (t) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
 
+// a path through corners [x, z], with each bend rounded off by a curve from
+// r before it to r after it
+function rounded(corners, r) {
+  const line = [];
+  corners.forEach((v, k) => {
+    const [prev, next] = [corners[k - 1], corners[k + 1]];
+    if (!prev || !next || prev[0] === next[0] || prev[1] === next[1]) {
+      line.push(v);
+      return;
+    }
+    const towards = (w) => {
+      const len = Math.hypot(w[0] - v[0], w[1] - v[1]);
+      return [v[0] + (r * (w[0] - v[0])) / len, v[1] + (r * (w[1] - v[1])) / len];
+    };
+    const [a, c] = [towards(prev), towards(next)];
+    for (let j = 0; j <= 6; j++) {
+      const t = j / 6;
+      const [p, q, u] = [(1 - t) ** 2, 2 * (1 - t) * t, t ** 2];
+      line.push([p * a[0] + q * v[0] + u * c[0], p * a[1] + q * v[1] + u * c[1]]);
+    }
+  });
+  return line;
+}
+
+// a ribbon along a path of points [x, z] with the given cross section, a
+// list of [offset from the middle, height, colour] from one side to the
+// other, raised by heightAt(x, z) where the land rises. uvs run across it,
+// and along it a repeat every half a cell
+function ribbon(line, profile, heightAt = () => 0) {
+  const shades = profile.map(([, , c]) => new THREE.Color(c));
+  const [position, color, uv] = [[], [], []];
+  let along = 0;
+  line.forEach(([x, z], k) => {
+    const [p, q] = [line[Math.max(k - 1, 0)], line[Math.min(k + 1, line.length - 1)]];
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    const [nx, nz] = [-(q[1] - p[1]) / len, (q[0] - p[0]) / len];
+    if (k > 0) along += Math.hypot(x - line[k - 1][0], z - line[k - 1][1]);
+    profile.forEach(([off, h], j) => {
+      const [px, pz] = [x + nx * off, z + nz * off];
+      position.push(px, h + heightAt(px, pz), pz);
+      color.push(shades[j].r, shades[j].g, shades[j].b);
+      uv.push(off / 0.5, along / 0.5);
+    });
+  });
+  const cols = profile.length;
+  const index = [];
+  for (let k = 0; k < line.length - 1; k++) {
+    for (let j = 0; j < cols - 1; j++) {
+      const [a, c] = [k * cols + j, k * cols + j + 1];
+      index.push(a, a + cols, c, c, a + cols, c + cols);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geometry.setIndex(index);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 // the light for an hour from 0 to 24, blending between the DAY keys
 function lightAt(hour) {
   const h = ((hour % 24) + 24) % 24;
@@ -358,7 +426,8 @@ export function createRenderer3d(container) {
   // roads are bumpy dirt. the plain material is what road parts are made
   // with, and look the one they're merged into, with the dirt laid out by
   // where it is on the board so it runs on across a road's pieces
-  const roadLook = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, normalMap: dirtTexture(11) });
+  const [dirtShape, dirtShade] = dirtTexture(11);
+  const roadLook = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, normalMap: dirtShape, map: dirtShade });
   roadLook.userData.texturePerUnit = 4;
   const roadPart = new THREE.MeshStandardMaterial({ color: ROAD_COLOUR });
   roadPart.userData.look = roadLook;
@@ -467,6 +536,18 @@ export function createRenderer3d(container) {
   // for each cell beside the river or a hedge, the [dx, dz] steps towards it
   let riverside = new Map();
   let hedgeside = new Map();
+  // how far each cell's land is raised above the rest
+  let lift = new Float32Array(0);
+  // the height of the land at x, z, blended between the middles of the cells
+  // round it
+  const liftAt = (x, z) => {
+    const n = Math.round(Math.sqrt(lift.length));
+    const [u, v] = [x + n / 2 - 0.5, z + n / 2 - 0.5];
+    const [c0, r0] = [Math.floor(u), Math.floor(v)];
+    const at = (r, c) => lift[clamp(r, 0, n - 1) * n + clamp(c, 0, n - 1)];
+    const [fu, fv] = [u - c0, v - r0];
+    return (at(r0, c0) * (1 - fu) + at(r0, c0 + 1) * fu) * (1 - fv) + (at(r0 + 1, c0) * (1 - fu) + at(r0 + 1, c0 + 1) * fu) * fv;
+  };
 
   const cellCentre = (b, i) => [b.colOf(i) - b.n / 2 + 0.5, b.rowOf(i) - b.n / 2 + 0.5];
 
@@ -494,12 +575,40 @@ export function createRenderer3d(container) {
     );
     shadow.position.set(0.3, -1.2, 0.5);
     landGroup.add(shadow);
+    // outside the city the land rises gently away from the river a step at a
+    // time, a little unevenly, so the river runs along a shallow valley
+    lift = new Float32Array(b.N);
+    if (!city) {
+      const dist = new Array(b.N).fill(Infinity);
+      const queue = [];
+      for (const [x1, y1, x2, y2] of riverEdges(b)) {
+        const [x, y] = [Math.min(x1, x2), Math.min(y1, y2)];
+        for (const i of x1 === x2 ? [y * n + x - 1, y * n + x] : [(y - 1) * n + x, y * n + x]) {
+          if (dist[i]) queue.push(i);
+          dist[i] = 0;
+        }
+      }
+      for (let q = 0; q < queue.length; q++) {
+        const i = queue[q];
+        const [r, c] = [b.rowOf(i), b.colOf(i)];
+        for (const [j, ok] of [[i - 1, c > 0], [i + 1, c < n - 1], [i - n, r > 0], [i + n, r < n - 1]]) {
+          if (ok && dist[j] === Infinity) {
+            dist[j] = dist[i] + 1;
+            queue.push(j);
+          }
+        }
+      }
+      const uneven = makeRng(hashString(`${b.regions}:lift`));
+      for (let i = 0; i < b.N; i++) lift[i] = 0.016 * Math.min(dist[i], 4) + (dist[i] ? uneven() * 0.008 : 0);
+    }
+
     // a plain tile per cell in its region's colour, glowing faintly in the
     // city
     for (let i = 0; i < b.N; i++) {
       const [x, z] = cellCentre(b, i);
       const biome = biomes[b.regions[i]];
-      const tile = solid(box, city ? street(theme.land(biome), theme.neon(biome)) : theme.land(biome), [0.97, TOP, 0.97], [x, TOP / 2, z]);
+      const h = TOP + lift[i];
+      const tile = solid(box, city ? street(theme.land(biome), theme.neon(biome)) : theme.land(biome), [0.97, h, 0.97], [x, h / 2, z]);
       tile.castShadow = false;
       landGroup.add(tile);
     }
@@ -540,56 +649,11 @@ export function createRenderer3d(container) {
     }
     if (river.length) {
       const corners = [river[0].slice(0, 2), ...river.map((e) => e.slice(2))].map(([x, y]) => [x - n / 2, y - n / 2]);
-      const line = [];
-      corners.forEach((v, k) => {
-        const [prev, next] = [corners[k - 1], corners[k + 1]];
-        if (!prev || !next || (prev[0] === next[0] || prev[1] === next[1])) {
-          line.push(v);
-          return;
-        }
-        // a curve from 0.4 before the bend to 0.4 after it
-        const a = [v[0] + 0.4 * (prev[0] - v[0]), v[1] + 0.4 * (prev[1] - v[1])];
-        const c = [v[0] + 0.4 * (next[0] - v[0]), v[1] + 0.4 * (next[1] - v[1])];
-        for (let j = 0; j <= 6; j++) {
-          const t = j / 6;
-          const [p, q, r] = [(1 - t) ** 2, 2 * (1 - t) * t, t ** 2];
-          line.push([p * a[0] + q * v[0] + r * c[0], p * a[1] + q * v[1] + r * c[1]]);
-        }
-      });
+      const line = rounded(corners, 0.4);
       // a strip along the river with the given cross section, a list of
-      // [offset from the middle, height, colour] from one side to the other
+      // [offset from the middle, height above the land, colour]
       const strip = (profile, look) => {
-        const shades = profile.map(([, , c]) => new THREE.Color(c));
-        const [position, color, uv] = [[], [], []];
-        // how far along the river, for textures to follow it, a repeat
-        // every half a cell
-        let along = 0;
-        line.forEach(([x, z], k) => {
-          const [p, q] = [line[Math.max(k - 1, 0)], line[Math.min(k + 1, line.length - 1)]];
-          const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
-          const [nx, nz] = [-(q[1] - p[1]) / len, (q[0] - p[0]) / len];
-          if (k > 0) along += Math.hypot(x - line[k - 1][0], z - line[k - 1][1]);
-          profile.forEach(([off, h], j) => {
-            position.push(x + nx * off, TOP + h, z + nz * off);
-            color.push(shades[j].r, shades[j].g, shades[j].b);
-            uv.push(off / 0.5, along / 0.5);
-          });
-        });
-        const cols = profile.length;
-        const index = [];
-        for (let k = 0; k < line.length - 1; k++) {
-          for (let j = 0; j < cols - 1; j++) {
-            const [a, c] = [k * cols + j, k * cols + j + 1];
-            index.push(a, a + cols, c, c, a + cols, c + cols);
-          }
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
-        geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
-        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-        geometry.setIndex(index);
-        geometry.computeVertexNormals();
-        const mesh = new THREE.Mesh(geometry, look);
+        const mesh = new THREE.Mesh(ribbon(line, profile.map(([off, h, c]) => [off, TOP + h, c])), look);
         mesh.receiveShadow = true;
         landGroup.add(mesh);
       };
@@ -607,19 +671,19 @@ export function createRenderer3d(container) {
     }
 
     // every other edge between regions, as [x, z, along z or x, the
-    // regions either side]
+    // regions either side, the height of the higher one]
     const edges = [];
     for (let i = 0; i < b.N; i++) {
       const r = b.rowOf(i);
       const c = b.colOf(i);
       const [x, z] = cellCentre(b, i);
       if (c < n - 1 && b.regions[i] !== b.regions[i + 1] && !onRiver.has(`${c + 1},${r},v`)) {
-        edges.push([x + 0.5, z, true, b.regions[i], b.regions[i + 1]]);
+        edges.push([x + 0.5, z, true, b.regions[i], b.regions[i + 1], Math.max(lift[i], lift[i + 1])]);
         beside(hedgeside, i, [1, 0]);
         beside(hedgeside, i + 1, [-1, 0]);
       }
       if (r < n - 1 && b.regions[i] !== b.regions[i + n] && !onRiver.has(`${c},${r + 1},h`)) {
-        edges.push([x, z + 0.5, false, b.regions[i], b.regions[i + n]]);
+        edges.push([x, z + 0.5, false, b.regions[i], b.regions[i + n], Math.max(lift[i], lift[i + n])]);
         beside(hedgeside, i, [0, 1]);
         beside(hedgeside, i + n, [0, -1]);
       }
@@ -666,14 +730,14 @@ export function createRenderer3d(container) {
     }
 
     // hedges: a row of bumps along each
-    const bumps = edges.flatMap(([x, z, alongZ]) =>
-      Array.from({ length: 7 }, (_, k) => (alongZ ? [x, z - 0.5 + k / 6] : [x - 0.5 + k / 6, z])),
+    const bumps = edges.flatMap(([x, z, alongZ, , , up]) =>
+      Array.from({ length: 7 }, (_, k) => (alongZ ? [x, z - 0.5 + k / 6, up] : [x - 0.5 + k / 6, z, up])),
     );
     const hedge = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), material("#ffffff"), bumps.length);
-    bumps.forEach(([x, z], k) => {
+    bumps.forEach(([x, z, up], k) => {
       const s = 0.09 + rng() * 0.04;
       m.makeScale(s, s * (0.9 + rng() * 0.4), s);
-      m.setPosition(x + (rng() - 0.5) * 0.03, TOP + s * 0.8, z + (rng() - 0.5) * 0.03);
+      m.setPosition(x + (rng() - 0.5) * 0.03, TOP + up + s * 0.8, z + (rng() - 0.5) * 0.03);
       hedge.setMatrixAt(k, m);
       hedge.setColorAt(k, colour.set(pick(rng, HEDGE)));
     });
@@ -732,7 +796,7 @@ export function createRenderer3d(container) {
 
   // a square keep, sometimes with turrets at its corners, under a pyramid
   // roof, with rows of windows, and now and then a flag on top
-  function keep(g, rng, stone, roof, x, z, k, h) {
+  function keep(g, rng, stone, roof, flags, x, z, k, h) {
     g.add(solid(box, stone, [2 * k, h, 2 * k], [x, h / 2, z]));
     g.add(solid(pyramid, roof, [k * 1.5, k * 1.6, k * 1.5], [x, h + k * 0.8, z]));
     if (rng() < 0.5) {
@@ -752,7 +816,7 @@ export function createRenderer3d(container) {
     if (rng() < 0.4) {
       const top = h + k * 1.6;
       g.add(solid(cylinder, "#4a3a2a", [0.008, 0.2, 0.008], [x, top + 0.1, z]));
-      g.add(solid(box, pick(rng, FLAGS), [0.09, 0.055, 0.005], [x + 0.045, top + 0.17, z]));
+      g.add(solid(box, pick(rng, flags), [0.09, 0.055, 0.005], [x + 0.045, top + 0.17, z]));
     }
   }
 
@@ -808,10 +872,12 @@ export function createRenderer3d(container) {
   // round shell keep with a great tower, or two walls one inside the other.
   // a castle beside the river, with sides a list of [dx, dz] steps towards
   // it, has its gate on the first with a drawbridge across the water, and one
-  // in a bend with the river on three sides is always round
-  function castle(rng, roofs, sides = []) {
+  // in a bend with the river on three sides is always round. roofs and
+  // flags are lists of colours to pick from
+  function castle(rng, roofs, flags, sides = []) {
     const g = new THREE.Group();
-    const stone = pick(rng, STONES);
+    // stone lightened most of the way to white, as if whitewashed
+    const stone = mixColour(pick(rng, STONES), "#f4f0e6", 0.65);
     const roof = roofPart(pick(rng, roofs));
     const river = sides[0] ?? null;
     let layout = Math.floor(rng() * 4);
@@ -825,7 +891,7 @@ export function createRenderer3d(container) {
       yard(box, 0.84, 0.84);
       bailey(g, rng, stone, roof, 0.42, 0.42, h, 0.09, river);
       reach = 0.42;
-      keep(g, rng, stone, roof, (rng() - 0.5) * 0.08, (rng() - 0.5) * 0.08, 0.17 + rng() * 0.04, 0.55 + rng() * 0.2);
+      keep(g, rng, stone, roof, flags, (rng() - 0.5) * 0.08, (rng() - 0.5) * 0.08, 0.17 + rng() * 0.04, 0.55 + rng() * 0.2);
     } else if (layout === 1) {
       const wide = rng() < 0.5;
       const [hx, hz] = wide ? [0.44, 0.3] : [0.3, 0.44];
@@ -835,7 +901,7 @@ export function createRenderer3d(container) {
       reach = river && river[0] ? hx : hz;
       const end = rng() < 0.5 ? -1 : 1;
       const [kx, kz] = wide ? [end * 0.22, 0] : [0, end * 0.22];
-      keep(g, rng, stone, roof, kx, kz, 0.14, 0.6 + rng() * 0.15);
+      keep(g, rng, stone, roof, flags, kx, kz, 0.14, 0.6 + rng() * 0.15);
       const [lx, lz] = wide ? [-end * 0.12, 0] : [0, -end * 0.12];
       hall(g, rng, stone, roofPart(pick(rng, roofs)), lx, lz, 0.32, 0.18, 0.22, !wide);
     } else if (layout === 2) {
@@ -866,7 +932,7 @@ export function createRenderer3d(container) {
       yard(box, 0.88, 0.88);
       bailey(g, rng, stone, roof, 0.44, 0.44, 0.18, 0.07, river);
       bailey(g, rng, stone, roof, 0.27, 0.27, 0.32, 0.075);
-      keep(g, rng, stone, roof, 0, 0, 0.12, 0.62 + rng() * 0.15);
+      keep(g, rng, stone, roof, flags, 0, 0, 0.12, 0.62 + rng() * 0.15);
       reach = 0.44;
     }
     if (river) {
@@ -888,9 +954,42 @@ export function createRenderer3d(container) {
   }
 
   // a farm: two to four fields of the land's crops in rows, and now and then
-  // a tree or two, though only rarely out in the open away from any hedge
-  function farm(rng, land, crops, hedged) {
+  // a tree or two, though only rarely out in the open away from any hedge.
+  // river is a list of [dx, dz] steps towards the river, if it's beside it
+  function farm(rng, land, crops, hedged, river = []) {
     const g = new THREE.Group();
+    // fields stop short of the river's bank on any side it runs along, and
+    // where it bends round a corner of the farm they round off with it. the
+    // bend is near a circle about (0.1, 0.1) in from that corner
+    const by = (dx, dz) => river.some(([a, c]) => a === dx && c === dz);
+    const reach = (dx, dz) => (by(dx, dz) ? 0.34 : 0.44);
+    const bends = [[-1, -1], [1, -1], [1, 1], [-1, 1]].filter(([cx, cz]) => by(cx, 0) && by(0, cz));
+    const outside = (x, z) =>
+      bends.find(([cx, cz]) => {
+        const [ox, oz] = [x - 0.1 * cx, z - 0.1 * cz];
+        return ox * cx > 0 && oz * cz > 0 && Math.hypot(ox, oz) > 0.24;
+      });
+    // a point pulled back onto the bend, if it's beyond it
+    const inside = ([x, z]) => {
+      const bend = outside(x, z);
+      if (!bend) return [x, z];
+      const [ox, oz] = [x - 0.1 * bend[0], z - 0.1 * bend[1]];
+      const d = Math.hypot(ox, oz);
+      return [0.1 * bend[0] + (ox * 0.24) / d, 0.1 * bend[1] + (oz * 0.24) / d];
+    };
+    // a flat slab over x0..x1 by z0..z1, cut round any bend
+    const slab = (look, x0, x1, z0, z1, h, y) => {
+      const corners = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+      const cut = corners.some(([x, z]) => outside(x, z));
+      if (!cut) return solid(box, look, [x1 - x0, h, z1 - z0], [(x0 + x1) / 2, y + h / 2, (z0 + z1) / 2]);
+      const pts = corners.flatMap((a, k) => {
+        const c = corners[(k + 1) % 4];
+        return Array.from({ length: 12 }, (_, j) => inside([a[0] + ((c[0] - a[0]) * j) / 12, a[1] + ((c[1] - a[1]) * j) / 12]));
+      });
+      const shape = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false }).rotateX(-Math.PI / 2);
+      return solid(geometry, look, [1, 1, 1], [0, y, 0]);
+    };
     const across = rng() < 0.5;
     const count = 2 + Math.floor(rng() * 3);
     const width = 0.88 / count;
@@ -900,10 +999,23 @@ export function createRenderer3d(container) {
       const offset = -0.44 + width * (k + 0.5);
       const [sx, sz] = across ? [0.88, width - 0.05] : [width - 0.05, 0.88];
       const [px, pz] = across ? [0, offset] : [offset, 0];
-      g.add(solid(box, field(tone, across), [sx, 0.03, sz], [px, 0.015, pz]));
+      const x0 = Math.max(px - sx / 2, -reach(-1, 0));
+      const x1 = Math.min(px + sx / 2, reach(1, 0));
+      const z0 = Math.max(pz - sz / 2, -reach(0, -1));
+      const z1 = Math.min(pz + sz / 2, reach(0, 1));
+      if (x1 - x0 < 0.02 || z1 - z0 < 0.02) continue;
+      g.add(slab(field(tone, across), x0, x1, z0, z1, 0.03, 0));
+      // rows across the field, each cut to the part of it inside any bend
       for (let d = -0.36; d <= 0.36; d += 0.12) {
-        const ridge = across ? [0.02, 0.012, sz * 0.9] : [sx * 0.9, 0.012, 0.02];
-        const at = across ? [d, 0.036, pz] : [px, 0.036, d];
+        const [a0, a1] = across ? [x0, x1] : [z0, z1];
+        if (d < a0 + 0.01 || d > a1 - 0.01) continue;
+        const [s0, s1] = across ? [z0, z1] : [x0, x1];
+        const [mid, half] = [(s0 + s1) / 2, ((s1 - s0) * 0.9) / 2];
+        const ok = Array.from({ length: 11 }, (_, j) => mid - half + (2 * half * j) / 10).filter((t) => !(across ? outside(d, t) : outside(t, d)));
+        if (ok.length < 2) continue;
+        const [t0, t1] = [ok[0], ok.at(-1)];
+        const ridge = across ? [0.02, 0.012, t1 - t0] : [t1 - t0, 0.012, 0.02];
+        const at = across ? [d, 0.036, (t0 + t1) / 2] : [(t0 + t1) / 2, 0.036, d];
         g.add(solid(box, rows, ridge, at));
       }
     }
@@ -1098,19 +1210,19 @@ export function createRenderer3d(container) {
     return v;
   }
 
-  // a dirt track along a path of cells, stopping at the castle walls
+  // a dirt track along a path of cells, stopping at the castle walls, with its
+  // corners curved
   function road(b, cells) {
     const g = new THREE.Group();
     const pts = cells.map((i) => cellCentre(b, i));
     const along = (a, c, t) => [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t];
     const n = pts.length;
-    const line = [along(pts[0], pts[1], 0.45), ...pts.slice(1, -1), along(pts[n - 1], pts[n - 2], 0.45)];
-    for (let k = 1; k < line.length; k++) {
-      const [[x0, z0], [x1, z1]] = [line[k - 1], line[k]];
-      const length = Math.hypot(x1 - x0, z1 - z0) + 0.14;
-      const seg = solid(box, roadPart, [x1 !== x0 ? length : 0.14, 0.02, z1 !== z0 ? length : 0.14], [(x0 + x1) / 2, 0.06, (z0 + z1) / 2]);
-      g.add(seg);
-    }
+    const corners = [along(pts[0], pts[1], 0.45), ...pts.slice(1, -1), along(pts[n - 1], pts[n - 2], 0.45)];
+    // a low raised track, rounding each corner it turns
+    const profile = [[0.075, 0.035], [0.06, 0.05], [-0.06, 0.05], [-0.075, 0.035]].map(([off, h]) => [off, h, ROAD_COLOUR]);
+    const track = new THREE.Mesh(ribbon(rounded(corners, 0.35), profile, liftAt), roadPart);
+    track.castShadow = track.receiveShadow = true;
+    g.add(track);
     return bake(g);
   }
 
@@ -1371,10 +1483,11 @@ export function createRenderer3d(container) {
         const neon = theme.neon(biomes[b.regions[i]]);
         obj = key[0] === "c" ? skyscrapers(rng, neon, towerHeight(b, i)) : sprawl(rng, neon);
       } else if (key[0] === "c") {
-        obj = castle(rng, theme.roofs(biomes[b.regions[i]]), riverside.get(i));
+        const biome = biomes[b.regions[i]];
+        obj = castle(rng, theme.roofs(biome), theme.flags(biome), riverside.get(i));
       } else {
         const biome = biomes[b.regions[i]];
-        obj = farm(rng, theme.land(biome), theme.crops(biome), hedgeside.has(i));
+        obj = farm(rng, theme.land(biome), theme.crops(biome), hedgeside.has(i), riverside.get(i));
         const towards = near ? near.split(".").map(Number).map((j) => [b.colOf(j) - b.colOf(i), b.rowOf(j) - b.rowOf(i)]) : [];
         houses(obj, makeRng(hashString(`${b.regions}:${i}:houses`)), towards, hedgeside.get(i));
         if (riverside.has(i)) riverbank(obj, makeRng(hashString(`${b.regions}:${i}:mill`)), riverside.get(i));
@@ -1382,7 +1495,7 @@ export function createRenderer3d(container) {
       }
       obj = bake(obj);
       const [x, z] = cellCentre(b, i);
-      obj.position.set(x, TOP, z);
+      obj.position.set(x, TOP + lift[i], z);
       return obj;
     });
 
